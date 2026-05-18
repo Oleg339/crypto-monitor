@@ -1,14 +1,15 @@
 .env
+.env.*
 session_userbot.json
 session_scraper.session
 *.session
 *.session-journal
 metrics_cache.json
 
-# Binaries
-tradebot
-tgauth
-signal_backtest
+# Binaries (root-level compiled binaries only)
+/tradebot
+/tgauth
+/signal_backtest
 
 # Go
 vendor/

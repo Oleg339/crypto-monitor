@@ -1,0 +1,895 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// ── Telegram types ────────────────────────────────────────────────────────────
+
+type tgUpdate struct {
+	UpdateID      int         `json:"update_id"`
+	Message       *tgMessage  `json:"message"`
+	CallbackQuery *tgCallback `json:"callback_query"`
+}
+
+type tgMessage struct {
+	MessageID int    `json:"message_id"`
+	Chat      tgChat `json:"chat"`
+	Text      string `json:"text"`
+}
+
+type tgChat struct {
+	ID int64 `json:"id"`
+}
+
+type tgCallback struct {
+	ID      string     `json:"id"`
+	Message *tgMessage `json:"message"`
+	Data    string     `json:"data"`
+}
+
+// ── Bot ───────────────────────────────────────────────────────────────────────
+
+type Bot struct {
+	token   string
+	chatID  int64
+	bybit   *BybitClient
+	cfg     *Config
+	paper   *PaperStore // nil when live mode
+	monitor *Monitor    // nil when live mode
+	hc      *http.Client
+
+	mu           sync.Mutex
+	pending      map[string]*pendingSignal
+	offset       int
+	paused       bool
+	pauseReason  string
+}
+
+func (b *Bot) Pause(reason string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.paused = true
+	b.pauseReason = reason
+}
+
+func (b *Bot) Resume() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.paused = false
+	b.pauseReason = ""
+}
+
+func (b *Bot) IsPaused() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.paused
+}
+
+type pendingSignal struct {
+	Symbol    string
+	Side      string
+	EntryLow  float64
+	EntryHigh float64
+	EntryMid  float64
+	SL        float64
+	TP        float64
+	QtyStr    string
+	PricePrec int
+	Margin    float64
+	Leverage  float64
+	Qty       float64
+}
+
+func newBot(cfg *Config, bybit *BybitClient, paper *PaperStore) *Bot {
+	return &Bot{
+		token:   cfg.TGToken,
+		chatID:  cfg.TGChatID,
+		bybit:   bybit,
+		cfg:     cfg,
+		paper:   paper,
+		hc:      &http.Client{Timeout: 35 * time.Second},
+		pending: map[string]*pendingSignal{},
+	}
+}
+
+// ── Poll loop ─────────────────────────────────────────────────────────────────
+
+func (b *Bot) Run(ctx context.Context) {
+	log.Println("[tg] long-polling started")
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("[tg] polling stopped")
+			return
+		default:
+		}
+
+		updates, err := b.getUpdates(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("[tg] getUpdates: %v", err)
+			select {
+			case <-time.After(5 * time.Second):
+			case <-ctx.Done():
+				return
+			}
+			continue
+		}
+
+		for _, u := range updates {
+			b.offset = u.UpdateID + 1
+			if u.Message != nil && u.Message.Chat.ID == b.chatID {
+				log.Printf("[tg] ← msg  chat=%d  text=%q", u.Message.Chat.ID, u.Message.Text)
+				b.handleMessage(u.Message)
+			}
+			if u.CallbackQuery != nil {
+				log.Printf("[tg] ← cb   id=%s  data=%q", u.CallbackQuery.ID, u.CallbackQuery.Data)
+				b.handleCallback(u.CallbackQuery)
+			}
+		}
+	}
+}
+
+func (b *Bot) getUpdates(ctx context.Context) ([]tgUpdate, error) {
+	url := fmt.Sprintf(
+		"https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=30&allowed_updates=[\"message\",\"callback_query\"]",
+		b.token, b.offset)
+	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+	resp, err := b.hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var res struct {
+		OK     bool       `json:"ok"`
+		Result []tgUpdate `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	return res.Result, nil
+}
+
+// ── Message router ────────────────────────────────────────────────────────────
+
+func (b *Bot) handleMessage(msg *tgMessage) {
+	text := strings.TrimSpace(msg.Text)
+	cmd, rest, _ := strings.Cut(text, " ")
+	cmd = strings.ToLower(cmd)
+	cmd = strings.TrimPrefix(cmd, "/")
+	cmd, _, _ = strings.Cut(cmd, "@") // strip @botname
+
+	switch cmd {
+	case "start", "help":
+		extra := ""
+		if b.cfg.PaperTrading {
+			extra = "\n<code>/stats</code> — статистика paper trading"
+		}
+		b.send(msg.Chat.ID, 0,
+			"📖 <b>Команды:</b>\n\n"+
+				"<code>/balance</code> — баланс аккаунта\n"+
+				"<code>/signal SYMBOL entry_low entry_high sl tp</code>\n"+
+				"<code>/positions</code> — открытые позиции\n"+
+				"<code>/cancel</code> — отменить все ордера"+
+				extra+"\n\n"+
+				"Пример:\n<code>/signal AVAXUSDT 9.20 9.30 8.50 11.50</code>", nil)
+	case "balance":
+		b.cmdBalance(msg)
+	case "signal":
+		b.cmdSignal(msg, strings.TrimSpace(rest))
+	case "positions":
+		b.cmdPositions(msg)
+	case "cancel":
+		b.cmdCancel(msg)
+	case "stats":
+		b.cmdStats(msg)
+	case "resume":
+		b.cmdResume(msg)
+	}
+}
+
+// ── /balance ──────────────────────────────────────────────────────────────────
+
+func (b *Bot) cmdBalance(msg *tgMessage) {
+	wi, err := b.bybit.Balance()
+	if err != nil {
+		b.send(msg.Chat.ID, 0, "❌ "+esc(err.Error()), nil)
+		return
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "💰 <b>Unified Account</b>\n\n")
+	fmt.Fprintf(&sb, "Equity:    <code>$%.2f</code>\n", wi.TotalEquity)
+	fmt.Fprintf(&sb, "Available: <code>$%.2f</code>\n", wi.TotalAvailBalance)
+
+	if len(wi.Coins) > 0 {
+		sb.WriteString("\n<b>Монеты:</b>\n")
+		for _, c := range wi.Coins {
+			fmt.Fprintf(&sb, "• %s: <code>%.6g</code>\n", c.Coin, c.WalletBalance)
+		}
+	}
+	b.send(msg.Chat.ID, 0, sb.String(), nil)
+}
+
+// ── /signal ───────────────────────────────────────────────────────────────────
+
+func (b *Bot) cmdSignal(msg *tgMessage, args string) {
+	parts := strings.Fields(args)
+	if len(parts) < 5 {
+		b.send(msg.Chat.ID, 0,
+			"⚠️ Формат: <code>/signal SYMBOL entry_low entry_high sl tp</code>\n"+
+				"Пример: <code>/signal AVAXUSDT 9.20 9.30 8.50 11.50</code>", nil)
+		return
+	}
+
+	symbol := strings.ToUpper(parts[0])
+	entryLow := parg(parts[1])
+	entryHigh := parg(parts[2])
+	sl := parg(parts[3])
+	tp := parg(parts[4])
+
+	if entryLow <= 0 || entryHigh <= 0 || sl <= 0 || tp <= 0 {
+		b.send(msg.Chat.ID, 0, "❌ Некорректные числа", nil)
+		return
+	}
+	if entryLow >= entryHigh {
+		b.send(msg.Chat.ID, 0, "❌ entry_low должен быть меньше entry_high", nil)
+		return
+	}
+	if sl >= entryLow {
+		b.send(msg.Chat.ID, 0, "❌ stop_loss должен быть ниже entry_low", nil)
+		return
+	}
+	if tp <= entryHigh {
+		b.send(msg.Chat.ID, 0, "❌ take_profit должен быть выше entry_high", nil)
+		return
+	}
+
+	// Fetch live equity and instrument info in parallel
+	type balResult struct {
+		equity float64
+		err    error
+	}
+	type infoResult struct {
+		info *InstrumentInfo
+		err  error
+	}
+	balCh := make(chan balResult, 1)
+	infoCh := make(chan infoResult, 1)
+
+	go func() {
+		wi, err := b.bybit.Balance()
+		if err != nil {
+			balCh <- balResult{0, err}
+			return
+		}
+		balCh <- balResult{wi.TotalEquity, nil}
+	}()
+	go func() {
+		info, err := b.bybit.InstrumentInfo(symbol)
+		infoCh <- infoResult{info, err}
+	}()
+
+	balRes := <-balCh
+	if balRes.err != nil {
+		b.send(msg.Chat.ID, 0, "❌ Не удалось получить баланс: <code>"+esc(balRes.err.Error())+"</code>", nil)
+		return
+	}
+	infoRes := <-infoCh
+	if infoRes.err != nil {
+		b.send(msg.Chat.ID, 0, "❌ Инструмент не найден: <code>"+esc(symbol)+"</code>", nil)
+		return
+	}
+
+	equity := balRes.equity
+	info := infoRes.info
+
+	entryMid := (entryLow + entryHigh) / 2.0
+	qtyPrec := decimals(info.QtyStep)
+	pricePrec := decimals(info.TickSize)
+
+	// Position sizing:
+	//   margin   = equity × risk%        (collateral you put up)
+	//   notional = margin × leverage     (total position value)
+	//   qty      = notional / entry_mid
+	margin := equity * b.cfg.RiskPct / 100
+	notional := margin * b.cfg.Leverage
+	qty := roundStep(notional/entryMid, info.QtyStep)
+	if qty < info.MinOrderQty {
+		qty = info.MinOrderQty
+	}
+	qtyStr := ff(qty, qtyPrec)
+
+	slPct := (entryMid - sl) / entryMid * 100
+	tpPct := (tp - entryMid) / entryMid * 100
+	rr := 0.0
+	if slPct != 0 {
+		rr = tpPct / slPct
+	}
+
+	base := strings.TrimSuffix(symbol, "USDT")
+
+	// Store pending signal
+	id := fmt.Sprintf("%d", time.Now().UnixNano())
+	b.mu.Lock()
+	b.pending[id] = &pendingSignal{
+		Symbol:    symbol,
+		Side:      "Buy",
+		EntryLow:  entryLow,
+		EntryHigh: entryHigh,
+		EntryMid:  entryMid,
+		SL:        sl,
+		TP:        tp,
+		QtyStr:    qtyStr,
+		PricePrec: pricePrec,
+		Margin:    margin,
+		Leverage:  b.cfg.Leverage,
+		Qty:       qty,
+	}
+	b.mu.Unlock()
+
+	text := fmt.Sprintf(
+		"📊 <b>%s/USDT LONG</b>\n\n"+
+			"Вход: <code>$%s – $%s</code> (mid: <code>$%s</code>)\n"+
+			"Стоп: <code>$%s</code> (−%.1f%%)\n"+
+			"TP:   <code>$%s</code> (+%.1f%%)\n"+
+			"R:R:  <code>%.1f:1</code>\n\n"+
+			"💰 <b>Позиция</b> (%.0f%% от $%.2f, плечо %.0fx):\n"+
+			"Количество: <code>%s %s</code>\n"+
+			"Маржа: <code>$%.2f</code>",
+		base,
+		ff(entryLow, pricePrec), ff(entryHigh, pricePrec), ff(entryMid, pricePrec),
+		ff(sl, pricePrec), slPct,
+		ff(tp, pricePrec), tpPct,
+		rr,
+		b.cfg.RiskPct, equity, b.cfg.Leverage,
+		qtyStr, base,
+		margin,
+	)
+
+	kb := inlineKB([][]kbBtn{{{
+		Text: "✅ Войти", Data: "confirm:" + id,
+	}, {
+		Text: "❌ Отмена", Data: "cancel:" + id,
+	}}})
+
+	b.send(msg.Chat.ID, 0, text, kb)
+}
+
+// ── /positions ────────────────────────────────────────────────────────────────
+
+func (b *Bot) cmdPositions(msg *tgMessage) {
+	if b.cfg.PaperTrading {
+		b.cmdPaperPositions(msg)
+		return
+	}
+
+	positions, err := b.bybit.Positions()
+	if err != nil {
+		b.send(msg.Chat.ID, 0, "❌ "+esc(err.Error()), nil)
+		return
+	}
+	if len(positions) == 0 {
+		b.send(msg.Chat.ID, 0, "📭 Открытых позиций нет", nil)
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString("📈 <b>Открытые позиции:</b>\n\n")
+	for _, p := range positions {
+		base := strings.TrimSuffix(p.Symbol, "USDT")
+		pnlSign := ""
+		if p.UnrealisedPnl > 0 {
+			pnlSign = "+"
+		}
+		fmt.Fprintf(&sb,
+			"<b>%s</b> %s  <code>%g @ $%g</code>  %.0fx\n"+
+				"  PnL: <code>%s$%.2f</code>  Mark: <code>$%g</code>\n\n",
+			base, p.Side, p.Size, p.EntryPrice, p.Leverage,
+			pnlSign, p.UnrealisedPnl, p.MarkPrice)
+	}
+	b.send(msg.Chat.ID, 0, sb.String(), nil)
+}
+
+func (b *Bot) cmdPaperPositions(msg *tgMessage) {
+	trades, err := b.paper.OpenTrades(context.Background())
+	if err != nil {
+		b.send(msg.Chat.ID, 0, "❌ "+esc(err.Error()), nil)
+		return
+	}
+	if len(trades) == 0 {
+		b.send(msg.Chat.ID, 0, "📭 [PAPER] Открытых позиций нет", nil)
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString("📝 <b>[PAPER] Открытые позиции:</b>\n\n")
+	for _, t := range trades {
+		base := strings.TrimSuffix(t.Symbol, "USDT")
+		fmt.Fprintf(&sb,
+			"<b>%s</b> LONG  <code>%g @ $%g</code>  %.0fx\n"+
+				"  SL: <code>$%g</code>  TP: <code>$%g</code>  ID: %d\n\n",
+			base, t.Qty, t.EntryPrice, t.Leverage, t.SL, t.TP, t.ID)
+	}
+	b.send(msg.Chat.ID, 0, sb.String(), nil)
+}
+
+// ── /stats ────────────────────────────────────────────────────────────────────
+
+func (b *Bot) cmdStats(msg *tgMessage) {
+	if b.paper == nil {
+		b.send(msg.Chat.ID, 0, "⚠️ Paper trading не включён (PAPER_TRADING=false)", nil)
+		return
+	}
+
+	ctx := context.Background()
+	stats, err := b.paper.Stats(ctx)
+	if err != nil {
+		b.send(msg.Chat.ID, 0, "❌ "+esc(err.Error()), nil)
+		return
+	}
+
+	if stats.Total == 0 && stats.OpenCount == 0 {
+		b.send(msg.Chat.ID, 0, "📊 [PAPER] Сделок пока нет", nil)
+		return
+	}
+
+	// Rolling winrate (last 10)
+	rolling, _ := b.paper.RecentClosedTrades(ctx, rollingWindow)
+	rollingWR := 0.0
+	if len(rolling) >= rollingWindow {
+		wins := 0
+		for _, t := range rolling {
+			if t.PnL != nil && *t.PnL > 0 {
+				wins++
+			}
+		}
+		rollingWR = float64(wins) / float64(len(rolling)) * 100
+	}
+
+	// Current equity
+	equity := b.cfg.PaperInitialEquity + stats.TotalPnL
+	equitySign := "+"
+	if stats.TotalPnL < 0 {
+		equitySign = ""
+	}
+	pnlSign := equitySign
+
+	// Backtest comparison
+	var btLine string
+	if b.cfg.BacktestWinRate > 0 {
+		wrDiff := stats.WinRate - b.cfg.BacktestWinRate
+		pnlDiff := stats.AvgPnL - b.cfg.BacktestAvgPnL
+		wrSign := "+"
+		if wrDiff < 0 {
+			wrSign = ""
+		}
+		pnlDiffSign := "+"
+		if pnlDiff < 0 {
+			pnlDiffSign = ""
+		}
+		btLine = fmt.Sprintf(
+			"\n📐 <b>vs Бэктест</b>\n"+
+				"WR: <code>%s%.1f%%</code> от %.1f%%\n"+
+				"AvgPnL: <code>%s$%.2f</code> от $%.2f",
+			wrSign, wrDiff, b.cfg.BacktestWinRate,
+			pnlDiffSign, pnlDiff, b.cfg.BacktestAvgPnL)
+	}
+
+	// Pause status
+	b.mu.Lock()
+	paused := b.paused
+	pauseReason := b.pauseReason
+	b.mu.Unlock()
+
+	statusLine := "🟢 Активен"
+	if paused {
+		statusLine = "⏸ На паузе: " + pauseReason
+	}
+
+	rollingLine := ""
+	if len(rolling) >= rollingWindow {
+		emoji := "✅"
+		if rollingWR < 30 {
+			emoji = "🔴"
+		} else if rollingWR < 50 {
+			emoji = "⚠️"
+		}
+		rollingLine = fmt.Sprintf("\n%s WR(10): <b>%.0f%%</b>", emoji, rollingWR)
+	}
+
+	text := fmt.Sprintf(
+		"📊 <b>Paper Trading Stats</b>\n"+
+			"<i>%s</i>\n\n"+
+			"Закрытых: <b>%d</b>  (✅%d / ❌%d)\n"+
+			"Win Rate:  <b>%.1f%%</b>%s\n"+
+			"Avg PnL:   <code>%s$%.2f</code>\n"+
+			"Total PnL: <code>%s$%.2f</code>\n"+
+			"Equity:    <code>$%.2f</code>\n"+
+			"Открытых:  <b>%d</b>%s",
+		statusLine,
+		stats.Total, stats.Wins, stats.Losses,
+		stats.WinRate, rollingLine,
+		pnlSign, stats.AvgPnL,
+		equitySign, stats.TotalPnL,
+		equity,
+		stats.OpenCount,
+		btLine,
+	)
+	b.send(msg.Chat.ID, 0, text, nil)
+}
+
+// SendSignalFromUserbot is called by the userbot when a new signal arrives.
+// Strategy: ExitTP3 — 100% of position closed at TP3.
+// If signal has fewer than 3 TPs, sends a plain alert without confirm button.
+func (b *Bot) SendSignalFromUserbot(sig *ParsedSignal) {
+	if len(sig.TPs) < 3 || sig.EntryLow == 0 || sig.SL == 0 {
+		b.send(b.chatID, 0, formatSignalAlert(sig)+"\n\n⚠️ <i>TP3 недоступен — торговля не предложена</i>", nil)
+		return
+	}
+	// ExitTP3: always use TP3 as the single exit target (100% of position)
+	tp := sig.TPs[2]
+
+	// Fetch balance + instrument info in parallel
+	type balResult struct {
+		equity float64
+		err    error
+	}
+	type infoResult struct {
+		info *InstrumentInfo
+		err  error
+	}
+	balCh := make(chan balResult, 1)
+	infoCh := make(chan infoResult, 1)
+
+	go func() {
+		wi, err := b.bybit.Balance()
+		if err != nil {
+			balCh <- balResult{0, err}
+			return
+		}
+		balCh <- balResult{wi.TotalEquity, nil}
+	}()
+	go func() {
+		info, err := b.bybit.InstrumentInfo(sig.Symbol)
+		infoCh <- infoResult{info, err}
+	}()
+
+	balRes := <-balCh
+	infoRes := <-infoCh
+
+	if balRes.err != nil || infoRes.err != nil {
+		// Fallback to plain alert on error
+		b.send(b.chatID, 0, formatSignalAlert(sig), nil)
+		return
+	}
+
+	equity := balRes.equity
+	info := infoRes.info
+	entryMid := (sig.EntryLow + sig.EntryHigh) / 2.0
+	qtyPrec := decimals(info.QtyStep)
+	pricePrec := decimals(info.TickSize)
+
+	margin := equity * b.cfg.RiskPct / 100
+	notional := margin * b.cfg.Leverage
+	qty := roundStep(notional/entryMid, info.QtyStep)
+	if qty < info.MinOrderQty {
+		qty = info.MinOrderQty
+	}
+	qtyStr := ff(qty, qtyPrec)
+
+	slPct := (entryMid - sig.SL) / entryMid * 100
+	tpPct := (tp - entryMid) / entryMid * 100
+	rr := 0.0
+	if slPct != 0 {
+		rr = tpPct / slPct
+	}
+	base := strings.TrimSuffix(sig.Symbol, "USDT")
+
+	id := fmt.Sprintf("%d", time.Now().UnixNano())
+	b.mu.Lock()
+	b.pending[id] = &pendingSignal{
+		Symbol:    sig.Symbol,
+		Side:      "Buy",
+		EntryLow:  sig.EntryLow,
+		EntryHigh: sig.EntryHigh,
+		EntryMid:  entryMid,
+		SL:        sig.SL,
+		TP:        tp,
+		QtyStr:    qtyStr,
+		PricePrec: pricePrec,
+		Margin:    margin,
+		Leverage:  b.cfg.Leverage,
+		Qty:       qty,
+	}
+	b.mu.Unlock()
+
+	// Build TP lines for display (TP3 is the exit target)
+	var tpLines string
+	for i, t := range sig.TPs {
+		pct := (t - entryMid) / entryMid * 100
+		mark := ""
+		if i == 2 {
+			mark = " 🎯 <b>выход 100%</b>"
+		}
+		tpLines += fmt.Sprintf("  TP%d: <code>$%g</code> (+%.1f%%)%s\n", i+1, t, pct, mark)
+	}
+
+	mode := "LIVE"
+	if b.cfg.PaperTrading {
+		mode = "PAPER"
+	}
+
+	text := fmt.Sprintf(
+		"🚨 <b>Новый сигнал #%d — %s/USDT %s</b> <i>[%s · ExitTP3]</i>\n\n"+
+			"Вход: <code>$%g – $%g</code> (mid: <code>$%s</code>)\n"+
+			"Стоп: <code>$%g</code> (−%.1f%%)\n"+
+			"R:R:  <code>%.1f:1</code>\n\n"+
+			"%s\n"+
+			"💰 <b>Позиция</b> (%.0f%% от $%.2f, плечо %.0fx):\n"+
+			"Количество: <code>%s %s</code>  Маржа: <code>$%.2f</code>",
+		sig.ID, base, sig.Direction, mode,
+		sig.EntryLow, sig.EntryHigh, ff(entryMid, pricePrec),
+		sig.SL, slPct,
+		rr,
+		tpLines,
+		b.cfg.RiskPct, equity, b.cfg.Leverage,
+		qtyStr, base, margin,
+	)
+
+	kb := inlineKB([][]kbBtn{{{
+		Text: "✅ Войти", Data: "confirm:" + id,
+	}, {
+		Text: "❌ Отмена", Data: "cancel:" + id,
+	}}})
+
+	b.send(b.chatID, 0, text, kb)
+}
+
+func (b *Bot) cmdResume(msg *tgMessage) {
+	b.mu.Lock()
+	wasPaused := b.paused
+	b.paused = false
+	b.pauseReason = ""
+	b.mu.Unlock()
+
+	if !wasPaused {
+		b.send(msg.Chat.ID, 0, "ℹ️ Бот и так активен", nil)
+		return
+	}
+	b.send(msg.Chat.ID, 0, "▶️ <b>Бот возобновлён</b> — сигналы снова принимаются", nil)
+	log.Println("[bot] resumed by user")
+}
+
+// ── /cancel ───────────────────────────────────────────────────────────────────
+
+func (b *Bot) cmdCancel(msg *tgMessage) {
+	n, err := b.bybit.CancelAll()
+	if err != nil {
+		b.send(msg.Chat.ID, 0, "❌ "+esc(err.Error()), nil)
+		return
+	}
+	b.mu.Lock()
+	b.pending = map[string]*pendingSignal{}
+	b.mu.Unlock()
+
+	b.send(msg.Chat.ID, 0,
+		fmt.Sprintf("🗑 Отменено ордеров: <b>%d</b>", n), nil)
+}
+
+// ── Callback (inline buttons) ─────────────────────────────────────────────────
+
+func (b *Bot) handleCallback(cb *tgCallback) {
+	b.answerCB(cb.ID, "")
+
+	action, id, _ := strings.Cut(cb.Data, ":")
+
+	b.mu.Lock()
+	sig, ok := b.pending[id]
+	if ok {
+		delete(b.pending, id)
+	}
+	b.mu.Unlock()
+
+	if !ok {
+		b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID,
+			"⚠️ Сигнал устарел или уже обработан", nil)
+		return
+	}
+
+	switch action {
+	case "confirm":
+		b.executeSignal(cb.Message, sig)
+	case "cancel":
+		base := strings.TrimSuffix(sig.Symbol, "USDT")
+		b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID,
+			fmt.Sprintf("❌ <b>Отменено:</b> %s/USDT", base), nil)
+	}
+}
+
+func (b *Bot) executeSignal(msg *tgMessage, sig *pendingSignal) {
+	b.mu.Lock()
+	paused := b.paused
+	reason := b.pauseReason
+	b.mu.Unlock()
+
+	if paused {
+		b.editMsg(msg.Chat.ID, msg.MessageID,
+			"⏸ <b>Бот на паузе</b>\n\n"+esc(reason)+"\n\nИспользуй /resume для возобновления", nil)
+		return
+	}
+
+	if b.cfg.PaperTrading {
+		b.executePaper(msg, sig)
+		return
+	}
+
+	b.editMsg(msg.Chat.ID, msg.MessageID, "⏳ Выставляю ордер...", nil)
+
+	if err := b.bybit.SetLeverage(sig.Symbol, b.cfg.Leverage); err != nil {
+		log.Printf("[bybit] set-leverage %s: %v", sig.Symbol, err)
+	}
+
+	priceStr := ff(sig.EntryMid, sig.PricePrec)
+	slStr := ff(sig.SL, sig.PricePrec)
+	tpStr := ff(sig.TP, sig.PricePrec)
+	base := strings.TrimSuffix(sig.Symbol, "USDT")
+
+	result, err := b.bybit.PlaceOrder(
+		sig.Symbol, sig.Side, sig.QtyStr, priceStr, slStr, tpStr)
+	if err != nil {
+		b.editMsg(msg.Chat.ID, msg.MessageID,
+			"❌ Ошибка ордера: <code>"+esc(err.Error())+"</code>", nil)
+		return
+	}
+
+	text := fmt.Sprintf(
+		"✅ <b>Ордер выставлен</b>\n\n"+
+			"%s/USDT LONG  <code>%s @ $%s</code>\n"+
+			"SL: <code>$%s</code>  TP: <code>$%s</code>\n\n"+
+			"<code>%s</code>",
+		base, sig.QtyStr, priceStr, slStr, tpStr,
+		esc(result.OrderID),
+	)
+	b.editMsg(msg.Chat.ID, msg.MessageID, text, nil)
+
+	log.Printf("[order] placed %s %s @ %s  sl=%s tp=%s  id=%s",
+		sig.Symbol, sig.QtyStr, priceStr, slStr, tpStr, result.OrderID)
+}
+
+func (b *Bot) executePaper(msg *tgMessage, sig *pendingSignal) {
+	b.editMsg(msg.Chat.ID, msg.MessageID, "⏳ [PAPER] Открываю позицию...", nil)
+
+	trade, err := b.paper.OpenTrade(context.Background(), sig)
+	if err != nil {
+		b.editMsg(msg.Chat.ID, msg.MessageID,
+			"❌ [PAPER] Ошибка: <code>"+esc(err.Error())+"</code>", nil)
+		return
+	}
+
+	b.editMsg(msg.Chat.ID, msg.MessageID, formatPaperConfirm(trade), nil)
+
+	// Subscribe monitor to watch this symbol
+	if b.monitor != nil {
+		b.monitor.Subscribe(trade.Symbol)
+	}
+
+	log.Printf("[paper] opened trade %d %s @ %.6g  sl=%.6g tp=%.6g  margin=%.2f",
+		trade.ID, trade.Symbol, trade.EntryPrice, trade.SL, trade.TP, trade.Margin)
+}
+
+// ── Telegram API helpers ──────────────────────────────────────────────────────
+
+type kbBtn struct {
+	Text string
+	Data string
+}
+
+func inlineKB(rows [][]kbBtn) json.RawMessage {
+	type btn struct {
+		Text         string `json:"text"`
+		CallbackData string `json:"callback_data"`
+	}
+	type keyboard struct {
+		InlineKeyboard [][]btn `json:"inline_keyboard"`
+	}
+	kb := keyboard{}
+	for _, row := range rows {
+		var r []btn
+		for _, b := range row {
+			r = append(r, btn{b.Text, b.Data})
+		}
+		kb.InlineKeyboard = append(kb.InlineKeyboard, r)
+	}
+	out, _ := json.Marshal(kb)
+	return out
+}
+
+func (b *Bot) apiURL(method string) string {
+	return "https://api.telegram.org/bot" + b.token + "/" + method
+}
+
+func (b *Bot) send(chatID int64, replyTo int, text string, kb json.RawMessage) {
+	body := map[string]interface{}{
+		"chat_id":    chatID,
+		"text":       text,
+		"parse_mode": "HTML",
+	}
+	if replyTo != 0 {
+		body["reply_to_message_id"] = replyTo
+	}
+	if kb != nil {
+		body["reply_markup"] = kb
+	}
+	b.tgPost("sendMessage", body)
+}
+
+func (b *Bot) editMsg(chatID int64, msgID int, text string, kb json.RawMessage) {
+	body := map[string]interface{}{
+		"chat_id":    chatID,
+		"message_id": msgID,
+		"text":       text,
+		"parse_mode": "HTML",
+	}
+	if kb != nil {
+		body["reply_markup"] = kb
+	}
+	b.tgPost("editMessageText", body)
+}
+
+func (b *Bot) answerCB(id, text string) {
+	b.tgPost("answerCallbackQuery", map[string]interface{}{
+		"callback_query_id": id,
+		"text":              text,
+	})
+}
+
+func (b *Bot) tgPost(method string, body interface{}) {
+	data, _ := json.Marshal(body)
+
+	// log outgoing (trim long text for readability)
+	preview := string(data)
+	if len(preview) > 200 {
+		preview = preview[:200] + "…"
+	}
+	log.Printf("[tg] → %s  %s", method, preview)
+
+	resp, err := b.hc.Post(b.apiURL(method), "application/json", bytes.NewReader(data))
+	if err != nil {
+		log.Printf("[tg] %s error: %v", method, err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		raw, _ := io.ReadAll(resp.Body)
+		log.Printf("[tg] %s %d: %s", method, resp.StatusCode, raw)
+	}
+}
+
+// esc escapes HTML special chars for Telegram HTML parse mode.
+func esc(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
+}
+
+// parg parses a float argument (accepts comma or dot as decimal separator).
+func parg(s string) float64 {
+	f, _ := strconv.ParseFloat(strings.ReplaceAll(s, ",", "."), 64)
+	return f
+}
