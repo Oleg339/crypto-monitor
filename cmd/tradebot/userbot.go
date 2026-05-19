@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gotd/td/session"
 	"github.com/gotd/td/telegram"
@@ -27,6 +29,11 @@ type Userbot struct {
 	channelID int64 // bare MTProto channel ID (without -100 prefix)
 	threadID  int   // forum topic ID (0 = any)
 	bot       *Bot
+
+	mu       sync.Mutex
+	api      *tg.Client
+	apiReady chan struct{}
+	apiOnce  sync.Once
 }
 
 type ParsedSignal struct {
@@ -49,6 +56,7 @@ func newUserbot(cfg *Config, bot *Bot) *Userbot {
 		channelID: parseChannelID(cfg.Trader3Channel),
 		threadID:  cfg.Trader3ThreadID,
 		bot:       bot,
+		apiReady:  make(chan struct{}),
 	}
 }
 
@@ -98,6 +106,11 @@ func (u *Userbot) Run(ctx context.Context) error {
 			return fmt.Errorf("auth: %w", err)
 		}
 		log.Printf("[userbot] authenticated — monitoring channel ID=%d", u.channelID)
+
+		u.mu.Lock()
+		u.api = client.API()
+		u.mu.Unlock()
+		u.apiOnce.Do(func() { close(u.apiReady) })
 
 		<-ctx.Done()
 		return ctx.Err()
@@ -166,6 +179,118 @@ func (u *Userbot) handleMsg(upd *tg.UpdateNewChannelMessage) error {
 
 	u.bot.SendSignalFromUserbot(sig)
 	return nil
+}
+
+// ── History fetching ──────────────────────────────────────────────────────────
+
+// FetchRecent fetches and parses signals from the channel for the last `hours` hours.
+// Returns an error if the userbot is not yet connected.
+func (u *Userbot) FetchRecent(ctx context.Context, hours int) ([]*ParsedSignal, error) {
+	select {
+	case <-u.apiReady:
+	default:
+		return nil, fmt.Errorf("userbot not ready yet")
+	}
+
+	if u.channelID == 0 {
+		return nil, fmt.Errorf("channel not configured")
+	}
+
+	u.mu.Lock()
+	api := u.api
+	u.mu.Unlock()
+
+	peer, err := u.resolveChannelPeer(ctx, api)
+	if err != nil {
+		return nil, fmt.Errorf("resolve channel: %w", err)
+	}
+
+	since := int(time.Now().Add(-time.Duration(hours) * time.Hour).Unix())
+
+	var msgs []tg.MessageClass
+	if u.threadID != 0 {
+		// Forum topic — use GetReplies
+		result, err := api.MessagesGetReplies(ctx, &tg.MessagesGetRepliesRequest{
+			Peer:  peer,
+			MsgID: u.threadID,
+			Limit: 100,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("get replies: %w", err)
+		}
+		switch r := result.(type) {
+		case *tg.MessagesChannelMessages:
+			msgs = r.Messages
+		case *tg.MessagesMessages:
+			msgs = r.Messages
+		case *tg.MessagesMessagesSlice:
+			msgs = r.Messages
+		}
+	} else {
+		result, err := api.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
+			Peer:  peer,
+			Limit: 100,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("get history: %w", err)
+		}
+		switch r := result.(type) {
+		case *tg.MessagesChannelMessages:
+			msgs = r.Messages
+		case *tg.MessagesMessages:
+			msgs = r.Messages
+		case *tg.MessagesMessagesSlice:
+			msgs = r.Messages
+		}
+	}
+
+	var signals []*ParsedSignal
+	for _, m := range msgs {
+		msg, ok := m.(*tg.Message)
+		if !ok || msg.Date < since {
+			continue
+		}
+		sig, ok := parseSignalText(msg.Message)
+		if !ok {
+			continue
+		}
+		signals = append(signals, sig)
+	}
+	log.Printf("[userbot] FetchRecent: scanned %d messages, found %d signals", len(msgs), len(signals))
+	return signals, nil
+}
+
+// resolveChannelPeer finds the channel in dialogs and returns its InputPeer with access hash.
+func (u *Userbot) resolveChannelPeer(ctx context.Context, api *tg.Client) (tg.InputPeerClass, error) {
+	result, err := api.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
+		Limit:      200,
+		OffsetPeer: &tg.InputPeerEmpty{},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var chats []tg.ChatClass
+	switch d := result.(type) {
+	case *tg.MessagesDialogs:
+		chats = d.Chats
+	case *tg.MessagesDialogsSlice:
+		chats = d.Chats
+	}
+
+	for _, c := range chats {
+		ch, ok := c.(*tg.Channel)
+		if !ok {
+			continue
+		}
+		if ch.ID == u.channelID {
+			return &tg.InputPeerChannel{
+				ChannelID:  ch.ID,
+				AccessHash: ch.AccessHash,
+			}, nil
+		}
+	}
+	return nil, fmt.Errorf("channel %d not found in dialogs", u.channelID)
 }
 
 // ── Signal parsing ────────────────────────────────────────────────────────────

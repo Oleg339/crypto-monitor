@@ -146,6 +146,7 @@ func main() {
 	}
 
 	ub := newUserbot(cfg, bot)
+	bot.userbot = ub
 
 	env := "mainnet"
 	if cfg.Testnet {

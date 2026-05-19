@@ -133,6 +133,27 @@ func (s *PaperStore) UpdateSignalStatus(ctx context.Context, id int64, status st
 	return err
 }
 
+func (s *PaperStore) FindSignalByTraderID(ctx context.Context, traderSignalID int) (*ReceivedSignal, error) {
+	var r ReceivedSignal
+	var tpsStr string
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, signal_id, symbol, direction, entry_low, entry_high, sl, tps, received_at, status
+		FROM received_signals WHERE signal_id=$1
+		ORDER BY received_at DESC LIMIT 1`,
+		traderSignalID,
+	).Scan(&r.ID, &r.SignalID, &r.Symbol, &r.Direction,
+		&r.EntryLow, &r.EntryHigh, &r.SL, &tpsStr,
+		&r.ReceivedAt, &r.Status)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal([]byte(tpsStr), &r.TPs)
+	return &r, nil
+}
+
 func (s *PaperStore) RecentSignals(ctx context.Context, hours int) ([]*ReceivedSignal, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, signal_id, symbol, direction, entry_low, entry_high, sl, tps, received_at, status

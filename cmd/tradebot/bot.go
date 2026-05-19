@@ -47,6 +47,7 @@ type Bot struct {
 	cfg     *Config
 	paper   *PaperStore // nil when live mode
 	monitor *Monitor    // nil when live mode
+	userbot *Userbot    // set after userbot is created
 	hc      *http.Client
 
 	mu           sync.Mutex
@@ -692,6 +693,28 @@ func (b *Bot) cmdSignals(msg *tgMessage) {
 	}
 
 	ctx := context.Background()
+
+	// Fetch fresh signals from Telegram channel history
+	if b.userbot != nil {
+		b.send(msg.Chat.ID, 0, "🔄 Читаю историю канала...", nil)
+		channelSigs, err := b.userbot.FetchRecent(ctx, 24)
+		if err != nil {
+			log.Printf("[signals] fetch from channel: %v", err)
+		}
+		// Save any signals not yet in DB
+		for _, sig := range channelSigs {
+			if len(sig.TPs) < 3 || sig.EntryLow == 0 || sig.SL == 0 {
+				continue
+			}
+			existing, _ := b.paper.FindSignalByTraderID(ctx, sig.ID)
+			if existing == nil {
+				if _, err := b.paper.SaveSignal(ctx, sig); err != nil {
+					log.Printf("[signals] save: %v", err)
+				}
+			}
+		}
+	}
+
 	signals, err := b.paper.RecentSignals(ctx, 24)
 	if err != nil {
 		b.send(msg.Chat.ID, 0, "❌ "+esc(err.Error()), nil)
@@ -702,8 +725,6 @@ func (b *Bot) cmdSignals(msg *tgMessage) {
 		return
 	}
 
-	// Summary header
-	total := len(signals)
 	pending, confirmed, rejected := 0, 0, 0
 	for _, s := range signals {
 		switch s.Status {
@@ -716,14 +737,12 @@ func (b *Bot) cmdSignals(msg *tgMessage) {
 		}
 	}
 	b.send(msg.Chat.ID, 0, fmt.Sprintf(
-		"📋 <b>Сигналы за 24ч: %d</b>  (⏳%d / ✅%d / ❌%d)\n\n<i>Pending сигналы показаны ниже:</i>",
-		total, pending, confirmed, rejected,
+		"📋 <b>Сигналы за 24ч: %d</b>  (⏳%d / ✅%d / ❌%d)",
+		len(signals), pending, confirmed, rejected,
 	), nil)
 
-	// For each signal: show status line; for pending ones send interactive message
 	for _, rs := range signals {
-		ago := time.Since(rs.ReceivedAt)
-		agoStr := formatAgo(ago)
+		agoStr := formatAgo(time.Since(rs.ReceivedAt))
 		base := strings.TrimSuffix(rs.Symbol, "USDT")
 
 		switch rs.Status {
@@ -738,20 +757,17 @@ func (b *Bot) cmdSignals(msg *tgMessage) {
 				rs.SignalID, base, rs.Direction, agoStr,
 			), nil)
 		case "pending":
-			// Check if still in memory
 			pendingKey := fmt.Sprintf("rs%d", rs.ID)
 			b.mu.Lock()
 			_, inMemory := b.pending[pendingKey]
 			b.mu.Unlock()
 
 			if inMemory {
-				// Already shown with buttons — just remind
 				b.send(msg.Chat.ID, 0, fmt.Sprintf(
-					"⏳ <b>#%d %s/USDT %s</b> — %s\n<i>Ожидает ответа (кнопки уже отправлены)</i>",
+					"⏳ <b>#%d %s/USDT %s</b> — %s\n<i>Ожидает ответа</i>",
 					rs.SignalID, base, rs.Direction, agoStr,
 				), nil)
 			} else {
-				// Resend with fresh calculations and buttons
 				parsedSig := &ParsedSignal{
 					ID:        rs.SignalID,
 					Symbol:    rs.Symbol,
@@ -761,10 +777,6 @@ func (b *Bot) cmdSignals(msg *tgMessage) {
 					SL:        rs.SL,
 					TPs:       rs.TPs,
 				}
-				b.send(msg.Chat.ID, 0, fmt.Sprintf(
-					"⏳ <b>#%d %s/USDT %s</b> — %s (пересчитано)",
-					rs.SignalID, base, rs.Direction, agoStr,
-				), nil)
 				b.sendSignalMsg(parsedSig, rs.ID)
 			}
 		}
