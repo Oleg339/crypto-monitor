@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,20 @@ import (
 )
 
 // ── Schema ────────────────────────────────────────────────────────────────────
+
+const createSignalsTableSQL = `
+CREATE TABLE IF NOT EXISTS received_signals (
+    id          SERIAL PRIMARY KEY,
+    signal_id   INTEGER     NOT NULL,
+    symbol      TEXT        NOT NULL,
+    direction   TEXT        NOT NULL,
+    entry_low   FLOAT8      NOT NULL,
+    entry_high  FLOAT8      NOT NULL,
+    sl          FLOAT8      NOT NULL,
+    tps         TEXT        NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    status      TEXT        NOT NULL DEFAULT 'pending'
+);`
 
 const createTableSQL = `
 CREATE TABLE IF NOT EXISTS paper_trades (
@@ -72,15 +87,77 @@ type PaperStore struct {
 	pool *pgxpool.Pool
 }
 
+// ── ReceivedSignal ────────────────────────────────────────────────────────────
+
+type ReceivedSignal struct {
+	ID         int64
+	SignalID   int
+	Symbol     string
+	Direction  string
+	EntryLow   float64
+	EntryHigh  float64
+	SL         float64
+	TPs        []float64
+	ReceivedAt time.Time
+	Status     string // pending | confirmed | rejected
+}
+
 func newPaperStore(ctx context.Context, dsn string) (*PaperStore, error) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("pgx pool: %w", err)
 	}
+	if _, err = pool.Exec(ctx, createSignalsTableSQL); err != nil {
+		return nil, fmt.Errorf("create signals table: %w", err)
+	}
 	if _, err = pool.Exec(ctx, createTableSQL); err != nil {
-		return nil, fmt.Errorf("create table: %w", err)
+		return nil, fmt.Errorf("create trades table: %w", err)
 	}
 	return &PaperStore{pool: pool}, nil
+}
+
+func (s *PaperStore) SaveSignal(ctx context.Context, sig *ParsedSignal) (int64, error) {
+	tpsJSON, _ := json.Marshal(sig.TPs)
+	var id int64
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO received_signals (signal_id, symbol, direction, entry_low, entry_high, sl, tps)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		RETURNING id`,
+		sig.ID, sig.Symbol, sig.Direction, sig.EntryLow, sig.EntryHigh, sig.SL, string(tpsJSON),
+	).Scan(&id)
+	return id, err
+}
+
+func (s *PaperStore) UpdateSignalStatus(ctx context.Context, id int64, status string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE received_signals SET status=$1 WHERE id=$2`, status, id)
+	return err
+}
+
+func (s *PaperStore) RecentSignals(ctx context.Context, hours int) ([]*ReceivedSignal, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, signal_id, symbol, direction, entry_low, entry_high, sl, tps, received_at, status
+		FROM received_signals
+		WHERE received_at >= NOW() - ($1 || ' hours')::interval
+		ORDER BY received_at DESC`,
+		fmt.Sprintf("%d", hours),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*ReceivedSignal
+	for rows.Next() {
+		var r ReceivedSignal
+		var tpsStr string
+		if err := rows.Scan(&r.ID, &r.SignalID, &r.Symbol, &r.Direction,
+			&r.EntryLow, &r.EntryHigh, &r.SL, &tpsStr,
+			&r.ReceivedAt, &r.Status); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(tpsStr), &r.TPs)
+		out = append(out, &r)
+	}
+	return out, rows.Err()
 }
 
 func (s *PaperStore) OpenTrade(ctx context.Context, sig *pendingSignal) (*PaperTrade, error) {

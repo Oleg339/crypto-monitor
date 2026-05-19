@@ -177,7 +177,8 @@ func (b *Bot) handleMessage(msg *tgMessage) {
 	case "start", "help":
 		extra := ""
 		if b.cfg.PaperTrading {
-			extra = "\n<code>/stats</code> — статистика paper trading"
+			extra = "\n<code>/stats</code> — статистика paper trading" +
+				"\n<code>/signals</code> — сигналы за последние 24ч"
 		}
 		b.send(msg.Chat.ID, 0,
 			"📖 <b>Команды:</b>\n\n"+
@@ -199,6 +200,8 @@ func (b *Bot) handleMessage(msg *tgMessage) {
 		b.cmdStats(msg)
 	case "resume":
 		b.cmdResume(msg)
+	case "signals":
+		b.cmdSignals(msg)
 	}
 }
 
@@ -541,10 +544,25 @@ func (b *Bot) SendSignalFromUserbot(sig *ParsedSignal) {
 		b.send(b.chatID, 0, formatSignalAlert(sig)+"\n\n⚠️ <i>TP3 недоступен — торговля не предложена</i>", nil)
 		return
 	}
-	// ExitTP3: always use TP3 as the single exit target (100% of position)
+
+	// Save to DB first (if paper store available)
+	var dbID int64
+	if b.paper != nil {
+		var err error
+		dbID, err = b.paper.SaveSignal(context.Background(), sig)
+		if err != nil {
+			log.Printf("[signals] save signal: %v", err)
+		}
+	}
+
+	b.sendSignalMsg(sig, dbID)
+}
+
+// sendSignalMsg builds and sends an interactive signal message with confirm/cancel buttons.
+// If dbID > 0, the pending key is "rs{dbID}" so callbacks can update DB status.
+func (b *Bot) sendSignalMsg(sig *ParsedSignal, dbID int64) {
 	tp := sig.TPs[2]
 
-	// Fetch balance + instrument info in parallel
 	type balResult struct {
 		equity float64
 		err    error
@@ -573,7 +591,6 @@ func (b *Bot) SendSignalFromUserbot(sig *ParsedSignal) {
 	infoRes := <-infoCh
 
 	if balRes.err != nil || infoRes.err != nil {
-		// Fallback to plain alert on error
 		b.send(b.chatID, 0, formatSignalAlert(sig), nil)
 		return
 	}
@@ -600,7 +617,14 @@ func (b *Bot) SendSignalFromUserbot(sig *ParsedSignal) {
 	}
 	base := strings.TrimSuffix(sig.Symbol, "USDT")
 
-	id := fmt.Sprintf("%d", time.Now().UnixNano())
+	// Pending key: "rs{dbID}" for userbot signals, nanosecond for manual
+	var id string
+	if dbID > 0 {
+		id = fmt.Sprintf("rs%d", dbID)
+	} else {
+		id = fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+
 	b.mu.Lock()
 	b.pending[id] = &pendingSignal{
 		Symbol:    sig.Symbol,
@@ -618,7 +642,6 @@ func (b *Bot) SendSignalFromUserbot(sig *ParsedSignal) {
 	}
 	b.mu.Unlock()
 
-	// Build TP lines for display (TP3 is the exit target)
 	var tpLines string
 	for i, t := range sig.TPs {
 		pct := (t - entryMid) / entryMid * 100
@@ -658,6 +681,104 @@ func (b *Bot) SendSignalFromUserbot(sig *ParsedSignal) {
 	}}})
 
 	b.send(b.chatID, 0, text, kb)
+}
+
+// ── /signals ──────────────────────────────────────────────────────────────────
+
+func (b *Bot) cmdSignals(msg *tgMessage) {
+	if b.paper == nil {
+		b.send(msg.Chat.ID, 0, "⚠️ Логирование сигналов доступно только в режиме PAPER_TRADING=true", nil)
+		return
+	}
+
+	ctx := context.Background()
+	signals, err := b.paper.RecentSignals(ctx, 24)
+	if err != nil {
+		b.send(msg.Chat.ID, 0, "❌ "+esc(err.Error()), nil)
+		return
+	}
+	if len(signals) == 0 {
+		b.send(msg.Chat.ID, 0, "📭 Сигналов за последние 24ч нет", nil)
+		return
+	}
+
+	// Summary header
+	total := len(signals)
+	pending, confirmed, rejected := 0, 0, 0
+	for _, s := range signals {
+		switch s.Status {
+		case "pending":
+			pending++
+		case "confirmed":
+			confirmed++
+		case "rejected":
+			rejected++
+		}
+	}
+	b.send(msg.Chat.ID, 0, fmt.Sprintf(
+		"📋 <b>Сигналы за 24ч: %d</b>  (⏳%d / ✅%d / ❌%d)\n\n<i>Pending сигналы показаны ниже:</i>",
+		total, pending, confirmed, rejected,
+	), nil)
+
+	// For each signal: show status line; for pending ones send interactive message
+	for _, rs := range signals {
+		ago := time.Since(rs.ReceivedAt)
+		agoStr := formatAgo(ago)
+		base := strings.TrimSuffix(rs.Symbol, "USDT")
+
+		switch rs.Status {
+		case "confirmed":
+			b.send(msg.Chat.ID, 0, fmt.Sprintf(
+				"✅ <b>#%d %s/USDT %s</b> — %s\nПодтверждён",
+				rs.SignalID, base, rs.Direction, agoStr,
+			), nil)
+		case "rejected":
+			b.send(msg.Chat.ID, 0, fmt.Sprintf(
+				"❌ <b>#%d %s/USDT %s</b> — %s\nОтклонён",
+				rs.SignalID, base, rs.Direction, agoStr,
+			), nil)
+		case "pending":
+			// Check if still in memory
+			pendingKey := fmt.Sprintf("rs%d", rs.ID)
+			b.mu.Lock()
+			_, inMemory := b.pending[pendingKey]
+			b.mu.Unlock()
+
+			if inMemory {
+				// Already shown with buttons — just remind
+				b.send(msg.Chat.ID, 0, fmt.Sprintf(
+					"⏳ <b>#%d %s/USDT %s</b> — %s\n<i>Ожидает ответа (кнопки уже отправлены)</i>",
+					rs.SignalID, base, rs.Direction, agoStr,
+				), nil)
+			} else {
+				// Resend with fresh calculations and buttons
+				parsedSig := &ParsedSignal{
+					ID:        rs.SignalID,
+					Symbol:    rs.Symbol,
+					Direction: rs.Direction,
+					EntryLow:  rs.EntryLow,
+					EntryHigh: rs.EntryHigh,
+					SL:        rs.SL,
+					TPs:       rs.TPs,
+				}
+				b.send(msg.Chat.ID, 0, fmt.Sprintf(
+					"⏳ <b>#%d %s/USDT %s</b> — %s (пересчитано)",
+					rs.SignalID, base, rs.Direction, agoStr,
+				), nil)
+				b.sendSignalMsg(parsedSig, rs.ID)
+			}
+		}
+	}
+}
+
+func formatAgo(d time.Duration) string {
+	if d < time.Minute {
+		return "только что"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dм назад", int(d.Minutes()))
+	}
+	return fmt.Sprintf("%dч назад", int(d.Hours()))
 }
 
 func (b *Bot) cmdResume(msg *tgMessage) {
@@ -711,13 +832,28 @@ func (b *Bot) handleCallback(cb *tgCallback) {
 		return
 	}
 
+	// Update DB status for userbot signals (keys starting with "rs")
+	if b.paper != nil && strings.HasPrefix(id, "rs") {
+		var dbID int64
+		fmt.Sscanf(id[2:], "%d", &dbID)
+		if dbID > 0 {
+			dbStatus := "rejected"
+			if action == "confirm" {
+				dbStatus = "confirmed"
+			}
+			if err := b.paper.UpdateSignalStatus(context.Background(), dbID, dbStatus); err != nil {
+				log.Printf("[signals] update status: %v", err)
+			}
+		}
+	}
+
 	switch action {
 	case "confirm":
 		b.executeSignal(cb.Message, sig)
 	case "cancel":
 		base := strings.TrimSuffix(sig.Symbol, "USDT")
 		b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID,
-			fmt.Sprintf("❌ <b>Отменено:</b> %s/USDT", base), nil)
+			fmt.Sprintf("❌ <b>Отклонено:</b> %s/USDT", base), nil)
 	}
 }
 
