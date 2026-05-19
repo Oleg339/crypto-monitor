@@ -115,19 +115,22 @@ func main() {
 
 	bybit := newBybitClient(cfg)
 
-	// Paper trading setup
+	// DB store — init whenever DATABASE_URL is set (required for paper trading, optional for signal logging)
 	var paper *PaperStore
 	var monitor *Monitor
-	if cfg.PaperTrading {
-		if cfg.DatabaseURL == "" {
-			log.Fatal("[config] PAPER_TRADING=true requires DATABASE_URL to be set")
-		}
+	if cfg.DatabaseURL != "" {
 		var err error
 		paper, err = newPaperStore(ctx, cfg.DatabaseURL)
 		if err != nil {
 			log.Fatalf("[paper] DB init: %v", err)
 		}
-		log.Println("[paper] mode ON — trades go to paper_trades table")
+		if cfg.PaperTrading {
+			log.Println("[paper] mode ON — trades go to paper_trades table")
+		} else {
+			log.Println("[signals] DB connected — signal logging enabled")
+		}
+	} else if cfg.PaperTrading {
+		log.Fatal("[config] PAPER_TRADING=true requires DATABASE_URL to be set")
 	}
 
 	bot := newBot(cfg, bybit, paper)

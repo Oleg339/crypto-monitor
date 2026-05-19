@@ -177,14 +177,14 @@ func (b *Bot) handleMessage(msg *tgMessage) {
 	case "start", "help":
 		extra := ""
 		if b.cfg.PaperTrading {
-			extra = "\n<code>/stats</code> — статистика paper trading" +
-				"\n<code>/signals</code> — сигналы за последние 24ч"
+			extra = "\n<code>/stats</code> — статистика paper trading"
 		}
 		b.send(msg.Chat.ID, 0,
 			"📖 <b>Команды:</b>\n\n"+
 				"<code>/balance</code> — баланс аккаунта\n"+
 				"<code>/signal SYMBOL entry_low entry_high sl tp</code>\n"+
 				"<code>/positions</code> — открытые позиции\n"+
+				"<code>/signals</code> — сигналы за последние 24ч\n"+
 				"<code>/cancel</code> — отменить все ордера"+
 				extra+"\n\n"+
 				"Пример:\n<code>/signal AVAXUSDT 9.20 9.30 8.50 11.50</code>", nil)
@@ -687,7 +687,7 @@ func (b *Bot) sendSignalMsg(sig *ParsedSignal, dbID int64) {
 
 func (b *Bot) cmdSignals(msg *tgMessage) {
 	if b.paper == nil {
-		b.send(msg.Chat.ID, 0, "⚠️ Логирование сигналов доступно только в режиме PAPER_TRADING=true", nil)
+		b.send(msg.Chat.ID, 0, "⚠️ Для /signals нужно задать DATABASE_URL в .env", nil)
 		return
 	}
 
