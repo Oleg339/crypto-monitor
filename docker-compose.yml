@@ -18,7 +18,8 @@ services:
       test: ["CMD-SHELL", "pg_isready -U postgres -d crypto_monitor"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
 
   redis:
     image: redis:7-alpine

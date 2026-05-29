@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+
 CREATE TABLE IF NOT EXISTS indicators (
     time         TIMESTAMPTZ NOT NULL,
     symbol       TEXT NOT NULL,

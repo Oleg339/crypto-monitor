@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+
 CREATE TABLE IF NOT EXISTS candles (
     time        TIMESTAMPTZ NOT NULL,
     symbol      TEXT NOT NULL,
