@@ -112,15 +112,18 @@ func checkResp(body io.Reader) (json.RawMessage, error) {
 // ── Balance ───────────────────────────────────────────────────────────────────
 
 type WalletInfo struct {
-	TotalEquity       float64
-	TotalAvailBalance float64
-	Coins             []CoinBalance
+	TotalEquity        float64
+	TotalWalletBalance float64 // without unrealised PnL
+	TotalUnrealisedPnl float64 // sum of open position PnL
+	TotalAvailBalance  float64
+	Coins              []CoinBalance
 }
 
 type CoinBalance struct {
-	Coin          string
-	WalletBalance float64
-	Available     float64
+	Coin           string
+	WalletBalance  float64
+	Available      float64
+	UnrealisedPnl  float64
 }
 
 func (c *BybitClient) Balance() (*WalletInfo, error) {
@@ -131,11 +134,14 @@ func (c *BybitClient) Balance() (*WalletInfo, error) {
 	var res struct {
 		List []struct {
 			TotalEquity            string `json:"totalEquity"`
+			TotalWalletBalance     string `json:"totalWalletBalance"`
+			TotalUnrealisedPnl     string `json:"totalPerpUPL"`
 			TotalAvailableBalance  string `json:"totalAvailableBalance"`
 			Coin                   []struct {
 				Coin            string `json:"coin"`
 				WalletBalance   string `json:"walletBalance"`
 				AvailToWithdraw string `json:"availToWithdraw"`
+				UnrealisedPnl   string `json:"unrealisedPnl"`
 			} `json:"coin"`
 		} `json:"list"`
 	}
@@ -144,8 +150,10 @@ func (c *BybitClient) Balance() (*WalletInfo, error) {
 	}
 	acc := res.List[0]
 	wi := &WalletInfo{
-		TotalEquity:       pf(acc.TotalEquity),
-		TotalAvailBalance: pf(acc.TotalAvailableBalance),
+		TotalEquity:        pf(acc.TotalEquity),
+		TotalWalletBalance: pf(acc.TotalWalletBalance),
+		TotalUnrealisedPnl: pf(acc.TotalUnrealisedPnl),
+		TotalAvailBalance:  pf(acc.TotalAvailableBalance),
 	}
 	for _, coin := range acc.Coin {
 		bal := pf(coin.WalletBalance)
@@ -156,6 +164,7 @@ func (c *BybitClient) Balance() (*WalletInfo, error) {
 			Coin:          coin.Coin,
 			WalletBalance: bal,
 			Available:     pf(coin.AvailToWithdraw),
+			UnrealisedPnl: pf(coin.UnrealisedPnl),
 		})
 	}
 	return wi, nil
@@ -361,6 +370,54 @@ func (c *BybitClient) CancelAll() (int, error) {
 	}
 	json.Unmarshal(raw, &res)
 	return len(res.List), nil
+}
+
+// ── Closed PnL ────────────────────────────────────────────────────────────────
+
+type ClosedTrade struct {
+	Symbol     string
+	Side       string
+	Qty        float64
+	EntryPrice float64
+	ExitPrice  float64
+	ClosedPnl  float64
+	ClosedAt   time.Time
+}
+
+func (c *BybitClient) ClosedPnl(limit int) ([]ClosedTrade, error) {
+	raw, err := c.get("/v5/position/closed-pnl",
+		fmt.Sprintf("category=linear&limit=%d", limit))
+	if err != nil {
+		return nil, err
+	}
+	var res struct {
+		List []struct {
+			Symbol     string `json:"symbol"`
+			Side       string `json:"side"`
+			Qty        string `json:"qty"`
+			AvgEntryPrice string `json:"avgEntryPrice"`
+			AvgExitPrice  string `json:"avgExitPrice"`
+			ClosedPnl  string `json:"closedPnl"`
+			UpdatedTime string `json:"updatedTime"`
+		} `json:"list"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	out := make([]ClosedTrade, 0, len(res.List))
+	for _, t := range res.List {
+		ms, _ := strconv.ParseInt(t.UpdatedTime, 10, 64)
+		out = append(out, ClosedTrade{
+			Symbol:     t.Symbol,
+			Side:       t.Side,
+			Qty:        pf(t.Qty),
+			EntryPrice: pf(t.AvgEntryPrice),
+			ExitPrice:  pf(t.AvgExitPrice),
+			ClosedPnl:  pf(t.ClosedPnl),
+			ClosedAt:   time.UnixMilli(ms).UTC(),
+		})
+	}
+	return out, nil
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

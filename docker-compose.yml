@@ -35,6 +35,29 @@ services:
       timeout: 5s
       retries: 5
 
+  tradebot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: tradebot
+    container_name: crypto_tradebot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@timescaledb:5432/crypto_monitor?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
   collector:
     build:
       context: .

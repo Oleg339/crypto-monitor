@@ -55,6 +55,7 @@ type Bot struct {
 	offset       int
 	paused       bool
 	pauseReason  string
+	hideEquity   bool // when true: show wallet balance only, not equity with unrealised PnL
 }
 
 func (b *Bot) Pause(reason string) {
@@ -214,19 +215,65 @@ func (b *Bot) cmdBalance(msg *tgMessage) {
 		b.send(msg.Chat.ID, 0, "❌ "+esc(err.Error()), nil)
 		return
 	}
+	b.mu.Lock()
+	hide := b.hideEquity
+	b.mu.Unlock()
 
+	text := b.formatBalance(wi, hide)
+	kb := b.balanceKB(hide)
+	b.send(msg.Chat.ID, 0, text, kb)
+}
+
+func (b *Bot) formatBalance(wi *WalletInfo, hideEquity bool) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "💰 <b>Unified Account</b>\n\n")
-	fmt.Fprintf(&sb, "Equity:    <code>$%.2f</code>\n", wi.TotalEquity)
-	fmt.Fprintf(&sb, "Available: <code>$%.2f</code>\n", wi.TotalAvailBalance)
+
+	if hideEquity {
+		// Show wallet balance only — unrealised PnL excluded
+		fmt.Fprintf(&sb, "Баланс:    <code>$%.2f</code>\n", wi.TotalWalletBalance)
+		fmt.Fprintf(&sb, "Available: <code>$%.2f</code>\n", wi.TotalAvailBalance)
+		if wi.TotalUnrealisedPnl != 0 {
+			fmt.Fprintf(&sb, "\n<i>Unrealised PnL скрыт</i>\n")
+		}
+	} else {
+		// Default: equity first, wallet below for reference
+		fmt.Fprintf(&sb, "Equity:    <code>$%.2f</code>\n", wi.TotalEquity)
+		fmt.Fprintf(&sb, "Баланс:    <code>$%.2f</code>\n", wi.TotalWalletBalance)
+		fmt.Fprintf(&sb, "Available: <code>$%.2f</code>\n", wi.TotalAvailBalance)
+		if wi.TotalUnrealisedPnl != 0 {
+			sign := "+"
+			if wi.TotalUnrealisedPnl < 0 {
+				sign = ""
+			}
+			fmt.Fprintf(&sb, "Unrealised PnL: <code>%s$%.2f</code>\n",
+				sign, wi.TotalUnrealisedPnl)
+		}
+	}
 
 	if len(wi.Coins) > 0 {
 		sb.WriteString("\n<b>Монеты:</b>\n")
 		for _, c := range wi.Coins {
-			fmt.Fprintf(&sb, "• %s: <code>%.6g</code>\n", c.Coin, c.WalletBalance)
+			if !hideEquity && c.UnrealisedPnl != 0 {
+				sign := "+"
+				if c.UnrealisedPnl < 0 {
+					sign = ""
+				}
+				fmt.Fprintf(&sb, "• %s: <code>%.6g</code> (PnL: %s%.2f)\n",
+					c.Coin, c.WalletBalance, sign, c.UnrealisedPnl)
+			} else {
+				fmt.Fprintf(&sb, "• %s: <code>%.6g</code>\n", c.Coin, c.WalletBalance)
+			}
 		}
 	}
-	b.send(msg.Chat.ID, 0, sb.String(), nil)
+	return sb.String()
+}
+
+func (b *Bot) balanceKB(hideEquity bool) json.RawMessage {
+	label := "🙈 Скрыть PnL"
+	if hideEquity {
+		label = "👁 Показать PnL"
+	}
+	return inlineKB([][]kbBtn{{{Text: label, Data: "balance:toggle_equity"}}})
 }
 
 // ── /signal ───────────────────────────────────────────────────────────────────
@@ -432,11 +479,74 @@ func (b *Bot) cmdPaperPositions(msg *tgMessage) {
 	b.send(msg.Chat.ID, 0, sb.String(), nil)
 }
 
+// ── /stats live ───────────────────────────────────────────────────────────────
+
+func (b *Bot) cmdLiveStats(msg *tgMessage) {
+	trades, err := b.bybit.ClosedPnl(50)
+	if err != nil {
+		b.send(msg.Chat.ID, 0, "❌ "+esc(err.Error()), nil)
+		return
+	}
+	if len(trades) == 0 {
+		b.send(msg.Chat.ID, 0, "📊 Закрытых сделок нет", nil)
+		return
+	}
+
+	var totalPnl float64
+	wins := 0
+	for _, t := range trades {
+		totalPnl += t.ClosedPnl
+		if t.ClosedPnl > 0 {
+			wins++
+		}
+	}
+	total := len(trades)
+	winRate := float64(wins) / float64(total) * 100
+	avgPnl := totalPnl / float64(total)
+
+	pnlSign := "+"
+	if totalPnl < 0 {
+		pnlSign = ""
+	}
+	avgSign := "+"
+	if avgPnl < 0 {
+		avgSign = ""
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "📊 <b>Live статистика</b> (последние %d)\n\n", total)
+	fmt.Fprintf(&sb, "WinRate:  <code>%.1f%%</code>  (%d/%d)\n", winRate, wins, total)
+	fmt.Fprintf(&sb, "Avg PnL:  <code>%s$%.2f</code>\n", avgSign, avgPnl)
+	fmt.Fprintf(&sb, "Total PnL: <code>%s$%.2f</code>\n", pnlSign, totalPnl)
+
+	// Last 5 trades
+	sb.WriteString("\n<b>Последние сделки:</b>\n")
+	for i, t := range trades {
+		if i >= 5 {
+			break
+		}
+		base := strings.TrimSuffix(t.Symbol, "USDT")
+		sign := "+"
+		if t.ClosedPnl < 0 {
+			sign = ""
+		}
+		emoji := "✅"
+		if t.ClosedPnl < 0 {
+			emoji = "❌"
+		}
+		fmt.Fprintf(&sb, "%s %s  <code>%s$%.2f</code>  <i>%s</i>\n",
+			emoji, base, sign, t.ClosedPnl,
+			t.ClosedAt.Format("02 Jan 15:04"))
+	}
+
+	b.send(msg.Chat.ID, 0, sb.String(), nil)
+}
+
 // ── /stats ────────────────────────────────────────────────────────────────────
 
 func (b *Bot) cmdStats(msg *tgMessage) {
-	if b.paper == nil {
-		b.send(msg.Chat.ID, 0, "⚠️ Paper trading не включён (PAPER_TRADING=false)", nil)
+	if !b.cfg.PaperTrading {
+		b.cmdLiveStats(msg)
 		return
 	}
 
@@ -830,6 +940,25 @@ func (b *Bot) handleCallback(cb *tgCallback) {
 	b.answerCB(cb.ID, "")
 
 	action, id, _ := strings.Cut(cb.Data, ":")
+
+	// ── balance toggle — no pending signal needed ─────────────────────────────
+	if action == "balance" && id == "toggle_equity" {
+		b.mu.Lock()
+		b.hideEquity = !b.hideEquity
+		hide := b.hideEquity
+		b.mu.Unlock()
+
+		wi, err := b.bybit.Balance()
+		if err != nil {
+			b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID,
+				"❌ "+esc(err.Error()), nil)
+			return
+		}
+		text := b.formatBalance(wi, hide)
+		kb := b.balanceKB(hide)
+		b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID, text, kb)
+		return
+	}
 
 	b.mu.Lock()
 	sig, ok := b.pending[id]

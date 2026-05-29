@@ -1,0 +1,44 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Build & Deploy to home server
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Link .env from server
+        run: cp /opt/crypto-monitor/.env .env
+
+      - name: Build images
+        run: docker compose build --pull
+
+      - name: Deploy
+        run: |
+          docker compose up -d --remove-orphans
+
+      - name: Wait for services
+        run: sleep 15
+
+      - name: Health check
+        run: |
+          echo "=== Container status ==="
+          docker compose ps
+
+          echo ""
+          echo "=== Tradebot logs ==="
+          docker compose logs tradebot --tail=30
+
+          echo ""
+          echo "=== Checking tradebot is running ==="
+          docker compose ps tradebot | grep -q "running" && echo "✅ tradebot OK" || (echo "❌ tradebot FAILED" && docker compose logs tradebot && exit 1)
+
+      - name: Cleanup old images
+        if: always()
+        run: docker image prune -f
