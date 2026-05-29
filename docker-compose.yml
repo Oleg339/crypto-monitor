@@ -48,6 +48,8 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@timescaledb:5432/crypto_monitor?sslmode=disable
       REDIS_URL: redis://redis:6379/0
+    volumes:
+      - /opt/crypto-monitor/session_userbot.json:/session_userbot.json:ro
     depends_on:
       timescaledb:
         condition: service_healthy
