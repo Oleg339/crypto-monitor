@@ -37,7 +37,7 @@ jobs:
 
           echo ""
           echo "=== Checking tradebot is running ==="
-          docker compose ps tradebot | grep -q "running" && echo "✅ tradebot OK" || (echo "❌ tradebot FAILED" && docker compose logs tradebot && exit 1)
+          docker compose ps tradebot | grep -q "Up" && echo "✅ tradebot OK" || (echo "❌ tradebot FAILED" && docker compose logs tradebot && exit 1)
 
       - name: Cleanup old images
         if: always()
