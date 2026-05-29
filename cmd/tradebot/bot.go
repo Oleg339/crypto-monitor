@@ -100,7 +100,7 @@ func newBot(cfg *Config, bybit *BybitClient, paper *PaperStore) *Bot {
 		bybit:   bybit,
 		cfg:     cfg,
 		paper:   paper,
-		hc:      &http.Client{Timeout: 35 * time.Second},
+		hc:      &http.Client{Timeout: 25 * time.Second},
 		pending: map[string]*pendingSignal{},
 	}
 }
@@ -147,7 +147,7 @@ func (b *Bot) Run(ctx context.Context) {
 
 func (b *Bot) getUpdates(ctx context.Context) ([]tgUpdate, error) {
 	url := fmt.Sprintf(
-		"https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=30&allowed_updates=[\"message\",\"callback_query\"]",
+		"https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=20&allowed_updates=[\"message\",\"callback_query\"]",
 		b.token, b.offset)
 	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
 	resp, err := b.hc.Do(req)
