@@ -91,6 +91,7 @@ type pendingSignal struct {
 	Margin    float64
 	Leverage  float64
 	Qty       float64
+	DBID      int64 // ID в received_signals, 0 для ручных сигналов
 }
 
 func newBot(cfg *Config, bybit *BybitClient, paper *PaperStore) *Bot {
@@ -750,6 +751,7 @@ func (b *Bot) sendSignalMsg(sig *ParsedSignal, dbID int64) {
 		Margin:    margin,
 		Leverage:  b.cfg.Leverage,
 		Qty:       qty,
+		DBID:      dbID,
 	}
 	b.mu.Unlock()
 
@@ -962,9 +964,6 @@ func (b *Bot) handleCallback(cb *tgCallback) {
 
 	b.mu.Lock()
 	sig, ok := b.pending[id]
-	if ok {
-		delete(b.pending, id)
-	}
 	b.mu.Unlock()
 
 	if !ok {
@@ -973,32 +972,45 @@ func (b *Bot) handleCallback(cb *tgCallback) {
 		return
 	}
 
-	// Update DB status for userbot signals (keys starting with "rs")
-	if b.paper != nil && strings.HasPrefix(id, "rs") {
-		var dbID int64
-		fmt.Sscanf(id[2:], "%d", &dbID)
-		if dbID > 0 {
-			dbStatus := "rejected"
-			if action == "confirm" {
-				dbStatus = "confirmed"
-			}
-			if err := b.paper.UpdateSignalStatus(context.Background(), dbID, dbStatus); err != nil {
-				log.Printf("[signals] update status: %v", err)
-			}
-		}
-	}
-
 	switch action {
 	case "confirm":
-		b.executeSignal(cb.Message, sig)
+		ok := b.executeSignal(cb.Message, sig)
+		if ok {
+			b.mu.Lock()
+			delete(b.pending, id)
+			b.mu.Unlock()
+			// Update DB status for userbot signals (keys starting with "rs")
+			if b.paper != nil && strings.HasPrefix(id, "rs") {
+				var dbID int64
+				fmt.Sscanf(id[2:], "%d", &dbID)
+				if dbID > 0 {
+					if err := b.paper.UpdateSignalStatus(context.Background(), dbID, "confirmed"); err != nil {
+						log.Printf("[signals] update status: %v", err)
+					}
+				}
+			}
+		}
 	case "cancel":
+		b.mu.Lock()
+		delete(b.pending, id)
+		b.mu.Unlock()
+		// Update DB status for userbot signals (keys starting with "rs")
+		if b.paper != nil && strings.HasPrefix(id, "rs") {
+			var dbID int64
+			fmt.Sscanf(id[2:], "%d", &dbID)
+			if dbID > 0 {
+				if err := b.paper.UpdateSignalStatus(context.Background(), dbID, "rejected"); err != nil {
+					log.Printf("[signals] update status: %v", err)
+				}
+			}
+		}
 		base := strings.TrimSuffix(sig.Symbol, "USDT")
 		b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID,
 			fmt.Sprintf("❌ <b>Отклонено:</b> %s/USDT", base), nil)
 	}
 }
 
-func (b *Bot) executeSignal(msg *tgMessage, sig *pendingSignal) {
+func (b *Bot) executeSignal(msg *tgMessage, sig *pendingSignal) bool {
 	b.mu.Lock()
 	paused := b.paused
 	reason := b.pauseReason
@@ -1007,12 +1019,12 @@ func (b *Bot) executeSignal(msg *tgMessage, sig *pendingSignal) {
 	if paused {
 		b.editMsg(msg.Chat.ID, msg.MessageID,
 			"⏸ <b>Бот на паузе</b>\n\n"+esc(reason)+"\n\nИспользуй /resume для возобновления", nil)
-		return
+		return false
 	}
 
 	if b.cfg.PaperTrading {
 		b.executePaper(msg, sig)
-		return
+		return true
 	}
 
 	b.editMsg(msg.Chat.ID, msg.MessageID, "⏳ Выставляю ордер...", nil)
@@ -1029,9 +1041,13 @@ func (b *Bot) executeSignal(msg *tgMessage, sig *pendingSignal) {
 	result, err := b.bybit.PlaceOrder(
 		sig.Symbol, sig.Side, sig.QtyStr, priceStr, slStr, tpStr)
 	if err != nil {
+		var retryKB json.RawMessage
+		if sig.DBID > 0 {
+			retryKB = inlineKB([][]kbBtn{{{Text: "🔄 Повторить", Data: "confirm:" + fmt.Sprintf("rs%d", sig.DBID)}}})
+		}
 		b.editMsg(msg.Chat.ID, msg.MessageID,
-			"❌ Ошибка ордера: <code>"+esc(err.Error())+"</code>", nil)
-		return
+			"❌ Ошибка ордера: <code>"+esc(err.Error())+"</code>\n\nСигнал сохранён, можешь повторить попытку.", retryKB)
+		return false
 	}
 
 	text := fmt.Sprintf(
@@ -1046,6 +1062,7 @@ func (b *Bot) executeSignal(msg *tgMessage, sig *pendingSignal) {
 
 	log.Printf("[order] placed %s %s @ %s  sl=%s tp=%s  id=%s",
 		sig.Symbol, sig.QtyStr, priceStr, slStr, tpStr, result.OrderID)
+	return true
 }
 
 func (b *Bot) executePaper(msg *tgMessage, sig *pendingSignal) {
