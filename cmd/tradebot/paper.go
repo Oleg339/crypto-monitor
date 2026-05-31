@@ -16,7 +16,7 @@ import (
 const createSignalsTableSQL = `
 CREATE TABLE IF NOT EXISTS received_signals (
     id          SERIAL PRIMARY KEY,
-    signal_id   INTEGER     NOT NULL,
+    signal_id   INTEGER     NOT NULL UNIQUE,
     symbol      TEXT        NOT NULL,
     direction   TEXT        NOT NULL,
     entry_low   FLOAT8      NOT NULL,
@@ -122,6 +122,7 @@ func (s *PaperStore) SaveSignal(ctx context.Context, sig *ParsedSignal) (int64, 
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO received_signals (signal_id, symbol, direction, entry_low, entry_high, sl, tps)
 		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		ON CONFLICT (signal_id) DO UPDATE SET signal_id = EXCLUDED.signal_id
 		RETURNING id`,
 		sig.ID, sig.Symbol, sig.Direction, sig.EntryLow, sig.EntryHigh, sig.SL, string(tpsJSON),
 	).Scan(&id)
