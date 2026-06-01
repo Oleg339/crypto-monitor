@@ -34,7 +34,12 @@ func newBybitClient(cfg *Config) *BybitClient {
 		base:   base,
 		key:    cfg.APIKey,
 		secret: cfg.APISecret,
-		hc:     &http.Client{Timeout: 10 * time.Second},
+		hc: &http.Client{
+			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				DisableKeepAlives: true,
+			},
+		},
 	}
 }
 
