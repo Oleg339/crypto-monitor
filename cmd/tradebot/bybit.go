@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,22 +27,79 @@ type BybitClient struct {
 	hc     *http.Client
 }
 
+// bybitDNS resolves using 1.1.1.1 directly, bypassing the Docker DNS proxy
+// (127.0.0.11) which drops requests when the host resolver lags.
+var bybitDNS = &net.Resolver{
+	PreferGo: true,
+	Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+		d := net.Dialer{Timeout: 5 * time.Second}
+		// Try Cloudflare first, fall back to Google.
+		for _, ns := range []string{"1.1.1.1:53", "8.8.8.8:53"} {
+			c, err := d.DialContext(ctx, "udp", ns)
+			if err == nil {
+				return c, nil
+			}
+		}
+		return nil, fmt.Errorf("all DNS nameservers unreachable")
+	},
+}
+
 func newBybitClient(cfg *Config) *BybitClient {
 	base := "https://api.bybit.com"
 	if cfg.Testnet {
 		base = "https://api-testnet.bybit.com"
+	}
+	dialer := &net.Dialer{
+		Timeout:   5 * time.Second,
+		Resolver:  bybitDNS,
 	}
 	return &BybitClient{
 		base:   base,
 		key:    cfg.APIKey,
 		secret: cfg.APISecret,
 		hc: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: 12 * time.Second,
 			Transport: &http.Transport{
+				DialContext:       dialer.DialContext,
 				DisableKeepAlives: true,
 			},
 		},
 	}
+}
+
+// doWithRetry executes fn up to 3 times on transient network errors.
+func doWithRetry(fn func() (json.RawMessage, error)) (json.RawMessage, error) {
+	const maxAttempts = 3
+	var lastErr error
+	for i := range maxAttempts {
+		raw, err := fn()
+		if err == nil {
+			return raw, nil
+		}
+		lastErr = err
+		// Only retry on network/timeout errors, not Bybit API errors.
+		if !isTransient(err) {
+			return nil, err
+		}
+		if i < maxAttempts-1 {
+			time.Sleep(time.Duration(2*(i+1)) * time.Second) // 2s, 4s
+		}
+	}
+	return nil, lastErr
+}
+
+// isTransient returns true for errors worth retrying (DNS, timeout, connection refused).
+func isTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	for _, kw := range []string{"dial tcp", "lookup", "timeout", "deadline", "connection refused", "EOF", "reset by peer"} {
+		if strings.Contains(s, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // ── Signing ───────────────────────────────────────────────────────────────────
@@ -63,43 +122,47 @@ type bybitEnvelope struct {
 }
 
 func (c *BybitClient) get(path, query string) (json.RawMessage, error) {
-	sig, ts := c.sign(query)
-	u := c.base + path
-	if query != "" {
-		u += "?" + query
-	}
-	req, _ := http.NewRequest("GET", u, nil)
-	req.Header.Set("X-BAPI-API-KEY", c.key)
-	req.Header.Set("X-BAPI-TIMESTAMP", ts)
-	req.Header.Set("X-BAPI-SIGN", sig)
-	req.Header.Set("X-BAPI-RECV-WINDOW", recvWindow)
+	return doWithRetry(func() (json.RawMessage, error) {
+		sig, ts := c.sign(query)
+		u := c.base + path
+		if query != "" {
+			u += "?" + query
+		}
+		req, _ := http.NewRequest("GET", u, nil)
+		req.Header.Set("X-BAPI-API-KEY", c.key)
+		req.Header.Set("X-BAPI-TIMESTAMP", ts)
+		req.Header.Set("X-BAPI-SIGN", sig)
+		req.Header.Set("X-BAPI-RECV-WINDOW", recvWindow)
 
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	return checkResp(resp.Body)
+		resp, err := c.hc.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		return checkResp(resp.Body)
+	})
 }
 
 func (c *BybitClient) post(path string, payload interface{}) (json.RawMessage, error) {
-	b, _ := json.Marshal(payload)
-	bodyStr := string(b)
-	sig, ts := c.sign(bodyStr)
+	return doWithRetry(func() (json.RawMessage, error) {
+		b, _ := json.Marshal(payload)
+		bodyStr := string(b)
+		sig, ts := c.sign(bodyStr)
 
-	req, _ := http.NewRequest("POST", c.base+path, strings.NewReader(bodyStr))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-BAPI-API-KEY", c.key)
-	req.Header.Set("X-BAPI-TIMESTAMP", ts)
-	req.Header.Set("X-BAPI-SIGN", sig)
-	req.Header.Set("X-BAPI-RECV-WINDOW", recvWindow)
+		req, _ := http.NewRequest("POST", c.base+path, strings.NewReader(bodyStr))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-BAPI-API-KEY", c.key)
+		req.Header.Set("X-BAPI-TIMESTAMP", ts)
+		req.Header.Set("X-BAPI-SIGN", sig)
+		req.Header.Set("X-BAPI-RECV-WINDOW", recvWindow)
 
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	return checkResp(resp.Body)
+		resp, err := c.hc.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		return checkResp(resp.Body)
+	})
 }
 
 func checkResp(body io.Reader) (json.RawMessage, error) {

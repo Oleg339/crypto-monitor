@@ -23,6 +23,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -1758,6 +1759,211 @@ func pct2(v float64, n int) float64 {
 	return v / float64(n)
 }
 
+// ── Parametric stress test ─────────────────────────────────────────────────────
+
+type Scenario struct {
+	Name    string
+	WinRate float64 // probability of win per trade [0..1]
+	AvgWin  float64 // mean win % on trade (e.g. 8.5 = +8.5%)
+	AvgLoss float64 // mean loss % on trade (positive number, e.g. 5.2 = -5.2%)
+	Trades  int     // number of trades to simulate
+}
+
+type stressStats struct {
+	p5, p25, p50, p75, p95 float64
+	probProfit              float64 // fraction of runs ending in profit
+	probRuin                float64 // fraction of runs where balance dropped below 20% of start
+	expectedReturn          float64
+}
+
+// runScenario runs nSims Monte Carlo paths for the scenario.
+// Each trade allocates `fraction` of current balance with `leverage`.
+// Win/loss magnitude is sampled from exponential distribution (mean = AvgWin/AvgLoss).
+func runScenario(sc Scenario, startCapital, fraction, leverage float64, nSims int) stressStats {
+	rng := rand.New(rand.NewSource(42))
+	ruinThreshold := startCapital * 0.20
+
+	finals := make([]float64, nSims)
+	profitCount := 0
+	ruinCount := 0
+
+	for sim := range nSims {
+		bal := startCapital
+		ruin := false
+		for range sc.Trades {
+			alloc := bal * fraction
+			if alloc <= 0 {
+				break
+			}
+			// Sample magnitude from exponential (mean = AvgWin or AvgLoss)
+			var pnlPct float64
+			if rng.Float64() < sc.WinRate {
+				pnlPct = rng.ExpFloat64() * sc.AvgWin // mean AvgWin
+			} else {
+				pnlPct = -(rng.ExpFloat64() * sc.AvgLoss) // mean AvgLoss (negative)
+			}
+			gain := alloc * leverage * pnlPct / 100
+			gain = math.Max(gain, -alloc) // liquidation cap
+			bal += gain
+			if bal < 0 {
+				bal = 0
+			}
+			if bal <= ruinThreshold {
+				ruin = true
+			}
+		}
+		finals[sim] = bal
+		if bal > startCapital {
+			profitCount++
+		}
+		if ruin {
+			ruinCount++
+		}
+		_ = sim
+	}
+
+	sort.Float64s(finals)
+	pctile := func(p float64) float64 {
+		idx := p / 100 * float64(nSims-1)
+		lo := int(idx)
+		hi := lo + 1
+		if hi >= nSims {
+			return finals[nSims-1]
+		}
+		return finals[lo] + (idx-float64(lo))*(finals[hi]-finals[lo])
+	}
+
+	sum := 0.0
+	for _, f := range finals {
+		sum += f
+	}
+
+	return stressStats{
+		p5:             pctile(5),
+		p25:            pctile(25),
+		p50:            pctile(50),
+		p75:            pctile(75),
+		p95:            pctile(95),
+		probProfit:     float64(profitCount) / float64(nSims) * 100,
+		probRuin:       float64(ruinCount) / float64(nSims) * 100,
+		expectedReturn: (sum/float64(nSims) - startCapital) / startCapital * 100,
+	}
+}
+
+func stressTest(realResults []Result, startCapital, fraction, leverage float64) {
+	// Derive "Base" params from real backtest results.
+	var wins, losses []float64
+	for _, r := range realResults {
+		if !r.EntryFilled || r.Skipped {
+			continue
+		}
+		if r.PnLPct > 0 {
+			wins = append(wins, r.PnLPct)
+		} else if r.PnLPct < 0 {
+			losses = append(losses, -r.PnLPct)
+		}
+	}
+	avgWin, avgLoss := 0.0, 0.0
+	for _, v := range wins {
+		avgWin += v
+	}
+	for _, v := range losses {
+		avgLoss += v
+	}
+	if len(wins) > 0 {
+		avgWin /= float64(len(wins))
+	}
+	if len(losses) > 0 {
+		avgLoss /= float64(len(losses))
+	}
+	totalFilled := len(wins) + len(losses)
+	baseWR := 0.0
+	if totalFilled > 0 {
+		baseWR = float64(len(wins)) / float64(totalFilled)
+	}
+
+	scenarios := []Scenario{
+		{"Base (бэктест)", baseWR, avgWin, avgLoss, totalFilled},
+		{"Бычий рынок",    0.65, avgWin * 1.10, avgLoss * 0.90, totalFilled},
+		{"Нейтральный",    0.50, avgWin * 0.85, avgLoss, totalFilled},
+		{"Медвежий рынок", 0.35, avgWin * 0.70, avgLoss * 1.10, totalFilled},
+		{"Худший квартал", 0.30, avgWin * 0.60, avgLoss * 1.20, totalFilled},
+	}
+
+	const nSims = 10_000
+	sep := strings.Repeat("─", 100)
+	wide := strings.Repeat("═", 100)
+
+	fmt.Printf("\n%s\n", wide)
+	fmt.Printf("  ПАРАМЕТРИЧЕСКИЙ СТРЕСС-ТЕСТ  (Монте-Карло, %d симуляций)\n", nSims)
+	fmt.Printf("  Старт $%.0f | %.0f%% на сделку | %.0fx плечо\n", startCapital, fraction*100, leverage)
+	fmt.Printf("  WinRate/AvgWin/AvgLoss из бэктеста: %.1f%% / +%.2f%% / -%.2f%%\n",
+		baseWR*100, avgWin, avgLoss)
+	fmt.Printf("%s\n", wide)
+	fmt.Printf("  %-22s  %5s  %6s  %6s  %8s  %8s  %8s  %8s  %8s  %8s  %8s\n",
+		"Сценарий", "WR%", "AvgWin", "AvgLoss",
+		"p5$", "p25$", "p50$", "p75$", "p95$",
+		"P(profit)", "P(ruin<20%)")
+	fmt.Printf("%s\n", sep)
+
+	for _, sc := range scenarios {
+		st := runScenario(sc, startCapital, fraction, leverage, nSims)
+		fmt.Printf("  %-22s  %4.0f%%  %+6.1f%%  %6.1f%%  %8.0f  %8.0f  %8.0f  %8.0f  %8.0f  %7.1f%%  %9.1f%%\n",
+			sc.Name, sc.WinRate*100, sc.AvgWin, sc.AvgLoss,
+			st.p5, st.p25, st.p50, st.p75, st.p95,
+			st.probProfit, st.probRuin)
+	}
+	fmt.Printf("%s\n", sep)
+
+	// Detailed percentile equity bands for each scenario.
+	fmt.Printf("\n  Медиана p50 и диапазоны уверенности (p25–p75, p5–p95):\n")
+	fmt.Printf("  %-22s  %20s   %20s   %20s\n",
+		"Сценарий", "Pessimistic (p5–p25)", "Likely (p25–p75)", "Optimistic (p75–p95)")
+	fmt.Printf("%s\n", sep)
+	for _, sc := range scenarios {
+		st := runScenario(sc, startCapital, fraction, leverage, nSims)
+		p5r := (st.p5 - startCapital) / startCapital * 100
+		p25r := (st.p25 - startCapital) / startCapital * 100
+		p50r := (st.p50 - startCapital) / startCapital * 100
+		p75r := (st.p75 - startCapital) / startCapital * 100
+		p95r := (st.p95 - startCapital) / startCapital * 100
+		fmt.Printf("  %-22s  %+6.0f%%..%+6.0f%%            %+6.0f%%..%+6.0f%% (med %+5.0f%%)  %+6.0f%%..%+6.0f%%\n",
+			sc.Name, p5r, p25r, p25r, p75r, p50r, p75r, p95r)
+	}
+	fmt.Printf("%s\n", sep)
+
+	// Kelly criterion for each scenario.
+	fmt.Printf("\n  Критерий Келли (оптимальная доля на сделку при данном leverage):\n")
+	fmt.Printf("  %-22s  %8s  %8s  %8s  %12s\n", "Сценарий", "b (R:R)", "Kelly%", "HalfKelly%", "Рекомендация")
+	fmt.Printf("%s\n", sep)
+	for _, sc := range scenarios {
+		// Kelly: f* = p - q/b, where b = avgWin/avgLoss (reward-to-risk ratio)
+		p := sc.WinRate
+		q := 1 - p
+		b := 0.0
+		if sc.AvgLoss > 0 {
+			b = sc.AvgWin / sc.AvgLoss
+		}
+		kelly := p - q/b
+		if kelly < 0 {
+			kelly = 0
+		}
+		halfKelly := kelly / 2
+		rec := ""
+		switch {
+		case fraction > kelly:
+			rec = "⚠ снизить размер"
+		case fraction <= halfKelly:
+			rec = "✓ консервативно"
+		default:
+			rec = "✓ в диапазоне"
+		}
+		fmt.Printf("  %-22s  %8.2f  %7.1f%%  %9.1f%%  %s\n",
+			sc.Name, b, kelly*100, halfKelly*100, rec)
+	}
+	fmt.Printf("%s\n", wide)
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 func main() {
@@ -1891,4 +2097,7 @@ func main() {
 
 	fmt.Println()
 	compareExitStrategies(results, partial33, bResults, 1000.0)
+
+	fmt.Println()
+	stressTest(results, 1000.0, 0.10, *leverage)
 }
