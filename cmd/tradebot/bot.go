@@ -972,6 +972,31 @@ func (b *Bot) handleCallback(cb *tgCallback) {
 		return
 	}
 
+	// ── setstop: retry setting SL/TP on an existing position ─────────────────
+	if action == "setstop" {
+		// id = "SYMBOL:SL:TP"
+		parts := strings.SplitN(id, ":", 3)
+		if len(parts) != 3 {
+			return
+		}
+		symbol, sl, tp := parts[0], parts[1], parts[2]
+		base := strings.TrimSuffix(symbol, "USDT")
+		retryKB := inlineKB([][]kbBtn{{{Text: "🔄 Повторить", Data: cb.Data}}})
+
+		if err := b.bybit.SetTradingStop(symbol, sl, tp); err != nil {
+			log.Printf("[bybit] retry set-trading-stop %s: %v", symbol, err)
+			b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID,
+				fmt.Sprintf("⚠️ <b>%s/USDT — SL/TP не выставлены</b>\n\n<code>%s</code>", base, esc(err.Error())),
+				retryKB)
+			return
+		}
+		log.Printf("[bybit] trading stop set %s sl=%s tp=%s (retry)", symbol, sl, tp)
+		b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID,
+			fmt.Sprintf("✅ <b>%s/USDT — SL/TP выставлены</b>\n\nSL: <code>$%s</code>  TP: <code>$%s</code>", base, sl, tp),
+			nil)
+		return
+	}
+
 	switch action {
 	case "confirm":
 		ok := b.executeSignal(cb.Message, sig)
@@ -1058,10 +1083,19 @@ func (b *Bot) executeSignal(msg *tgMessage, sig *pendingSignal) bool {
 		base, sig.QtyStr, priceStr, slStr, tpStr,
 		esc(result.OrderID),
 	)
-	b.editMsg(msg.Chat.ID, msg.MessageID, text, nil)
 
 	log.Printf("[order] placed %s %s @ %s  sl=%s tp=%s  id=%s",
 		sig.Symbol, sig.QtyStr, priceStr, slStr, tpStr, result.OrderID)
+
+	if err := b.bybit.SetTradingStop(sig.Symbol, slStr, tpStr); err != nil {
+		log.Printf("[bybit] set-trading-stop %s: %v", sig.Symbol, err)
+		stopData := fmt.Sprintf("setstop:%s:%s:%s", sig.Symbol, slStr, tpStr)
+		kb := inlineKB([][]kbBtn{{{Text: "🔄 Выставить SL/TP", Data: stopData}}})
+		b.editMsg(msg.Chat.ID, msg.MessageID,
+			text+"\n\n⚠️ <b>SL/TP не выставлены на позицию</b> — нажми кнопку", kb)
+	} else {
+		b.editMsg(msg.Chat.ID, msg.MessageID, text, nil)
+	}
 	return true
 }
 
