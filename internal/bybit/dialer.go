@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,6 +51,45 @@ func NewResilientDialer() *ResilientDialer {
 		},
 		ip: make(map[string]string),
 	}
+}
+
+// newResilientHTTPClient builds an HTTP client that dials through a
+// ResilientDialer kept warm for the host of rawURL.
+func newResilientHTTPClient(rawURL string) *http.Client {
+	rd := NewResilientDialer()
+	if u, err := url.Parse(rawURL); err == nil && u.Hostname() != "" {
+		rd.KeepWarm(u.Hostname(), 5*time.Minute)
+	}
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			DialContext: rd.DialContext,
+		},
+	}
+}
+
+// KeepWarm resolves host in the background at startup and every interval, so
+// the IP cache is armed before the first DNS outage and stays fresh as CDN
+// IPs rotate. Failures are ignored — the next tick retries.
+func (rd *ResilientDialer) KeepWarm(host string, interval time.Duration) {
+	go func() {
+		for {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			addrs, err := rd.d.Resolver.LookupHost(ctx, host)
+			cancel()
+			if err == nil {
+				for _, a := range addrs {
+					if ip := net.ParseIP(a); ip != nil && ip.To4() != nil {
+						rd.mu.Lock()
+						rd.ip[host] = a
+						rd.mu.Unlock()
+						break
+					}
+				}
+			}
+			time.Sleep(interval)
+		}
+	}()
 }
 
 func (rd *ResilientDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {

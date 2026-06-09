@@ -33,6 +33,7 @@ func newBybitClient(cfg *Config) *BybitClient {
 		base = "https://api-testnet.bybit.com"
 	}
 	dialer := bybit.NewResilientDialer()
+	dialer.KeepWarm(strings.TrimPrefix(base, "https://"), 5*time.Minute)
 	return &BybitClient{
 		base:   base,
 		key:    cfg.APIKey,

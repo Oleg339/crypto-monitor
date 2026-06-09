@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,10 +38,14 @@ type WSClient struct {
 }
 
 // NewWSClient creates a new websocket client.
-func NewWSClient(url string) *WSClient {
+func NewWSClient(wsURL string) *WSClient {
+	dialer := NewResilientDialer()
+	if u, err := url.Parse(wsURL); err == nil && u.Hostname() != "" {
+		dialer.KeepWarm(u.Hostname(), 5*time.Minute)
+	}
 	return &WSClient{
-		url:       url,
-		dialer:    NewResilientDialer(),
+		url:       wsURL,
+		dialer:    dialer,
 		handlers:  make(map[string]MessageHandler),
 		semaphore: make(chan struct{}, semaphoreSize),
 	}

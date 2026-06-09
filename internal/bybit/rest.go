@@ -28,12 +28,7 @@ func NewRESTClient(cfg *config.Config) *RESTClient {
 		baseURL:   cfg.RESTURL,
 		apiKey:    cfg.BybitAPIKey,
 		apiSecret: cfg.BybitAPISecret,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				DialContext: NewResilientDialer().DialContext,
-			},
-		},
+		httpClient: newResilientHTTPClient(cfg.RESTURL),
 	}
 }
 
