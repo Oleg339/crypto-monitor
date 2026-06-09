@@ -30,6 +30,9 @@ func NewRESTClient(cfg *config.Config) *RESTClient {
 		apiSecret: cfg.BybitAPISecret,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				DialContext: NewResilientDialer().DialContext,
+			},
 		},
 	}
 }

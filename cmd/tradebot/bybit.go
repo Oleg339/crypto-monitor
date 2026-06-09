@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,11 +8,12 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yourorg/crypto-monitor/internal/bybit"
 )
 
 const recvWindow = "5000"
@@ -27,32 +27,12 @@ type BybitClient struct {
 	hc     *http.Client
 }
 
-// bybitDNS resolves using 1.1.1.1 directly, bypassing the Docker DNS proxy
-// (127.0.0.11) which drops requests when the host resolver lags.
-var bybitDNS = &net.Resolver{
-	PreferGo: true,
-	Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-		d := net.Dialer{Timeout: 5 * time.Second}
-		// Try Cloudflare first, fall back to Google.
-		for _, ns := range []string{"1.1.1.1:53", "8.8.8.8:53"} {
-			c, err := d.DialContext(ctx, "udp", ns)
-			if err == nil {
-				return c, nil
-			}
-		}
-		return nil, fmt.Errorf("all DNS nameservers unreachable")
-	},
-}
-
 func newBybitClient(cfg *Config) *BybitClient {
 	base := "https://api.bybit.com"
 	if cfg.Testnet {
 		base = "https://api-testnet.bybit.com"
 	}
-	dialer := &net.Dialer{
-		Timeout:   5 * time.Second,
-		Resolver:  bybitDNS,
-	}
+	dialer := bybit.NewResilientDialer()
 	return &BybitClient{
 		base:   base,
 		key:    cfg.APIKey,

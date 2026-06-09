@@ -27,6 +27,7 @@ type MessageHandler func(topic string, data json.RawMessage)
 // WSClient manages a websocket connection to Bybit with auto-reconnect.
 type WSClient struct {
 	url        string
+	dialer     *ResilientDialer
 	conn       *websocket.Conn
 	mu         sync.RWMutex
 	handlers   map[string]MessageHandler
@@ -39,6 +40,7 @@ type WSClient struct {
 func NewWSClient(url string) *WSClient {
 	return &WSClient{
 		url:       url,
+		dialer:    NewResilientDialer(),
 		handlers:  make(map[string]MessageHandler),
 		semaphore: make(chan struct{}, semaphoreSize),
 	}
@@ -53,7 +55,11 @@ func (c *WSClient) OnMessage(prefix string, handler MessageHandler) {
 
 // Connect establishes the websocket connection.
 func (c *WSClient) Connect(ctx context.Context) error {
-	dialer := websocket.DefaultDialer
+	dialer := &websocket.Dialer{
+		Proxy:            websocket.DefaultDialer.Proxy,
+		HandshakeTimeout: websocket.DefaultDialer.HandshakeTimeout,
+		NetDialContext:   c.dialer.DialContext,
+	}
 	conn, _, err := dialer.DialContext(ctx, c.url, nil)
 	if err != nil {
 		return fmt.Errorf("ws: dial %s: %w", c.url, err)
