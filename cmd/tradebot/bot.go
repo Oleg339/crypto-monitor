@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/yourorg/crypto-monitor/internal/bybit"
 )
 
 // ── Telegram types ────────────────────────────────────────────────────────────
@@ -94,14 +96,21 @@ type pendingSignal struct {
 	DBID      int64 // ID в received_signals, 0 для ручных сигналов
 }
 
-func newBot(cfg *Config, bybit *BybitClient, paper *PaperStore) *Bot {
+func newBot(cfg *Config, bybitClient *BybitClient, paper *PaperStore) *Bot {
+	dialer := bybit.NewResilientDialer()
+	dialer.KeepWarm("api.telegram.org", 5*time.Minute)
 	return &Bot{
-		token:   cfg.TGToken,
-		chatID:  cfg.TGChatID,
-		bybit:   bybit,
-		cfg:     cfg,
-		paper:   paper,
-		hc:      &http.Client{Timeout: 15 * time.Second},
+		token:  cfg.TGToken,
+		chatID: cfg.TGChatID,
+		bybit:  bybitClient,
+		cfg:    cfg,
+		paper:  paper,
+		hc: &http.Client{
+			Timeout: 15 * time.Second,
+			Transport: &http.Transport{
+				DialContext: dialer.DialContext,
+			},
+		},
 		pending: map[string]*pendingSignal{},
 	}
 }
