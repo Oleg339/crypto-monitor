@@ -65,6 +65,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("[webapp] db connect: %v", err)
 	}
+	// Same idempotent bootstrap as the tradebot's trade sync, so neither
+	// container depends on the other's startup order.
+	for _, stmt := range []string{
+		`ALTER TABLE positions ADD COLUMN IF NOT EXISTS order_id TEXT`,
+		`ALTER TABLE positions ADD COLUMN IF NOT EXISTS qty FLOAT8`,
+		`ALTER TABLE positions ADD COLUMN IF NOT EXISTS pnl FLOAT8`,
+	} {
+		if _, err := db.Exec(context.Background(), stmt); err != nil {
+			log.Printf("[webapp] schema bootstrap: %v", err)
+		}
+	}
 
 	s := &server{
 		bybit:     newBybitClient(base, getenv("BYBIT_API_KEY", ""), getenv("BYBIT_API_SECRET", "")),

@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -480,6 +481,72 @@ func (c *BybitClient) ClosedPnl(limit int) ([]ClosedTrade, error) {
 		})
 	}
 	return out, nil
+}
+
+// ClosedPnlRecord is a full closed-pnl entry used by the trade sync.
+type ClosedPnlRecord struct {
+	OrderID       string
+	Symbol        string
+	Side          string // side of the closing order
+	Qty           float64
+	EntryPrice    float64
+	ExitPrice     float64
+	ClosedPnl     float64
+	Leverage      float64
+	CumEntryValue float64
+	CreatedAt     time.Time
+	ClosedAt      time.Time
+}
+
+// ClosedPnlRange pages through /v5/position/closed-pnl for [startMs, endMs]
+// (Bybit caps a single window at 7 days). Returns records and the next cursor.
+func (c *BybitClient) ClosedPnlRange(startMs, endMs int64, cursor string) ([]ClosedPnlRecord, string, error) {
+	q := fmt.Sprintf("category=linear&limit=100&startTime=%d&endTime=%d", startMs, endMs)
+	if cursor != "" {
+		q += "&cursor=" + url.QueryEscape(cursor)
+	}
+	raw, err := c.get("/v5/position/closed-pnl", q)
+	if err != nil {
+		return nil, "", err
+	}
+	var res struct {
+		NextPageCursor string `json:"nextPageCursor"`
+		List           []struct {
+			OrderID       string `json:"orderId"`
+			Symbol        string `json:"symbol"`
+			Side          string `json:"side"`
+			Qty           string `json:"qty"`
+			AvgEntryPrice string `json:"avgEntryPrice"`
+			AvgExitPrice  string `json:"avgExitPrice"`
+			ClosedPnl     string `json:"closedPnl"`
+			Leverage      string `json:"leverage"`
+			CumEntryValue string `json:"cumEntryValue"`
+			CreatedTime   string `json:"createdTime"`
+			UpdatedTime   string `json:"updatedTime"`
+		} `json:"list"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, "", err
+	}
+	out := make([]ClosedPnlRecord, 0, len(res.List))
+	for _, t := range res.List {
+		created, _ := strconv.ParseInt(t.CreatedTime, 10, 64)
+		updated, _ := strconv.ParseInt(t.UpdatedTime, 10, 64)
+		out = append(out, ClosedPnlRecord{
+			OrderID:       t.OrderID,
+			Symbol:        t.Symbol,
+			Side:          t.Side,
+			Qty:           pf(t.Qty),
+			EntryPrice:    pf(t.AvgEntryPrice),
+			ExitPrice:     pf(t.AvgExitPrice),
+			ClosedPnl:     pf(t.ClosedPnl),
+			Leverage:      pf(t.Leverage),
+			CumEntryValue: pf(t.CumEntryValue),
+			CreatedAt:     time.UnixMilli(created).UTC(),
+			ClosedAt:      time.UnixMilli(updated).UTC(),
+		})
+	}
+	return out, res.NextPageCursor, nil
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

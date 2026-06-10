@@ -228,7 +228,9 @@ function renderTrades() {
     return true;
   });
   $("trades-list").innerHTML = list.length
-    ? list.map((t) => `
+    ? list.map((t) => {
+      const dur = t.closedAt ? fmtDur(t.openedAt, t.closedAt) : "";
+      return `
       <div class="row">
         <div class="main">
           <div><b>${t.symbol}</b>${dirBadge(t.direction)}
@@ -237,10 +239,11 @@ function renderTrades() {
           <div class="sub">$${fmtPrice(t.entry)} → ${t.closePrice ? "$" + fmtPrice(t.closePrice) : "…"}</div>
         </div>
         <div class="right">
-          <div>${t.pnlPct != null ? pnlSpan(t.pnlPct, "%") : "—"}</div>
-          <div class="sub">${fmtTime(t.openedAt)}${t.closedAt ? " · " + fmtDur(t.openedAt, t.closedAt) : ""}</div>
+          <div>${t.pnlPct != null ? pnlSpan(t.pnlPct, "%") : "—"}${t.pnl != null ? " " + pnlSpan(t.pnl) : ""}</div>
+          <div class="sub">${fmtTime(t.closedAt || t.openedAt)}${dur && dur !== "0 мин" ? " · " + dur : ""}</div>
         </div>
-      </div>`).join("")
+      </div>`;
+    }).join("")
     : `<div class="muted">Ничего не найдено</div>`;
 }
 

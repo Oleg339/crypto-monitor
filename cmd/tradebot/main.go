@@ -129,6 +129,8 @@ func main() {
 		} else {
 			log.Println("[signals] DB connected — signal logging enabled")
 		}
+		go runTradeSync(ctx, paper.pool, bybit)
+		log.Println("[tradesync] closed-trade sync started")
 	} else if cfg.PaperTrading {
 		log.Fatal("[config] PAPER_TRADING=true requires DATABASE_URL to be set")
 	}

@@ -14,6 +14,7 @@ type trade struct {
 	Entry      float64    `json:"entry"`
 	ClosePrice *float64   `json:"closePrice"`
 	PnlPct     *float64   `json:"pnlPct"`
+	Pnl        *float64   `json:"pnl"`
 	OpenedAt   time.Time  `json:"openedAt"`
 	ClosedAt   *time.Time `json:"closedAt"`
 	Status     string     `json:"status"`
@@ -21,9 +22,9 @@ type trade struct {
 
 func loadTrades(ctx context.Context, db *pgxpool.Pool, limit int) ([]trade, error) {
 	const q = `
-		SELECT id, symbol, direction, entry, close_price, pnl_pct, opened_at, closed_at, status
+		SELECT id, symbol, direction, entry, close_price, pnl_pct, pnl, opened_at, closed_at, status
 		FROM positions
-		ORDER BY opened_at DESC
+		ORDER BY closed_at DESC NULLS FIRST, opened_at DESC
 		LIMIT $1`
 	rows, err := db.Query(ctx, q, limit)
 	if err != nil {
@@ -35,7 +36,7 @@ func loadTrades(ctx context.Context, db *pgxpool.Pool, limit int) ([]trade, erro
 	for rows.Next() {
 		var t trade
 		if err := rows.Scan(&t.ID, &t.Symbol, &t.Direction, &t.Entry,
-			&t.ClosePrice, &t.PnlPct, &t.OpenedAt, &t.ClosedAt, &t.Status); err != nil {
+			&t.ClosePrice, &t.PnlPct, &t.Pnl, &t.OpenedAt, &t.ClosedAt, &t.Status); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
