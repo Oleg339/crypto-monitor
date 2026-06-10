@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Trading Bot</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav id="tabs">
+    <button class="tab active" data-tab="overview">Обзор</button>
+    <button class="tab" data-tab="trades">Сделки</button>
+    <button class="tab" data-tab="signals">Сигналы</button>
+  </nav>
+
+  <main>
+    <section id="overview" class="page active">
+      <div id="balance-card" class="card">
+        <div class="loading">Загрузка…</div>
+      </div>
+      <div class="card">
+        <h2>Equity (Σ PnL %)</h2>
+        <svg id="equity-chart" viewBox="0 0 320 120" preserveAspectRatio="none"></svg>
+      </div>
+      <h2>Открытые позиции</h2>
+      <div id="positions"></div>
+      <div id="updated" class="muted"></div>
+    </section>
+
+    <section id="trades" class="page">
+      <h2>История сделок</h2>
+      <div id="trades-list"><div class="loading">Загрузка…</div></div>
+    </section>
+
+    <section id="signals" class="page">
+      <h2>Сигналы</h2>
+      <div id="signals-list"><div class="loading">Загрузка…</div></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

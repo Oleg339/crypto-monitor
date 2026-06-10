@@ -18,7 +18,9 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-s -w" -o /out/analyzer ./cmd/analyzer && \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-s -w" -o /out/alerter ./cmd/alerter
+    -ldflags="-s -w" -o /out/alerter ./cmd/alerter && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-s -w" -o /out/webapp ./cmd/webapp
 
 # --- tradebot ---
 FROM alpine:3.21 AS tradebot
@@ -44,3 +46,9 @@ FROM alpine:3.21 AS alerter
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /out/alerter /usr/local/bin/alerter
 ENTRYPOINT ["/usr/local/bin/alerter"]
+
+# --- webapp ---
+FROM alpine:3.21 AS webapp
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=builder /out/webapp /usr/local/bin/webapp
+ENTRYPOINT ["/usr/local/bin/webapp"]

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -118,6 +119,7 @@ func newBot(cfg *Config, bybitClient *BybitClient, paper *PaperStore) *Bot {
 // ── Poll loop ─────────────────────────────────────────────────────────────────
 
 func (b *Bot) Run(ctx context.Context) {
+	b.setupWebApp()
 	log.Println("[tg] long-polling started")
 	for {
 		select {
@@ -153,6 +155,21 @@ func (b *Bot) Run(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// setupWebApp installs the Mini App menu button if WEBAPP_URL is set.
+func (b *Bot) setupWebApp() {
+	url := os.Getenv("WEBAPP_URL")
+	if url == "" {
+		return
+	}
+	b.tgPost("setChatMenuButton", map[string]interface{}{
+		"menu_button": map[string]interface{}{
+			"type":    "web_app",
+			"text":    "📊 Панель",
+			"web_app": map[string]string{"url": url},
+		},
+	})
 }
 
 func (b *Bot) getUpdates(ctx context.Context) ([]tgUpdate, error) {

@@ -1,0 +1,133 @@
+:root {
+  --bg: var(--tg-theme-bg-color, #18222d);
+  --card: var(--tg-theme-secondary-bg-color, #232e3c);
+  --text: var(--tg-theme-text-color, #f5f5f5);
+  --hint: var(--tg-theme-hint-color, #708499);
+  --accent: var(--tg-theme-button-color, #5288c1);
+  --green: #4caf7d;
+  --red: #e05c5c;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  padding-bottom: 24px;
+}
+
+#tabs {
+  display: flex;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 10;
+  border-bottom: 1px solid var(--card);
+}
+
+.tab {
+  flex: 1;
+  padding: 12px 0;
+  background: none;
+  border: none;
+  color: var(--hint);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.tab.active {
+  color: var(--accent);
+  border-bottom: 2px solid var(--accent);
+}
+
+main { padding: 12px; }
+
+.page { display: none; }
+.page.active { display: block; }
+
+.card {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+h2 {
+  font-size: 14px;
+  color: var(--hint);
+  font-weight: 600;
+  margin: 10px 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.balance-equity { font-size: 28px; font-weight: 700; }
+.balance-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--hint);
+}
+.balance-row b { color: var(--text); font-weight: 500; }
+
+.pos {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+
+.pos-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.pos-symbol { font-weight: 700; font-size: 16px; }
+.side-buy { color: var(--green); font-size: 12px; font-weight: 600; }
+.side-sell { color: var(--red); font-size: 12px; font-weight: 600; }
+
+.pos-detail {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--hint);
+}
+
+.pnl-pos { color: var(--green); font-weight: 600; }
+.pnl-neg { color: var(--red); font-weight: 600; }
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--card);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+.row .sub { color: var(--hint); font-size: 12px; margin-top: 2px; }
+
+.muted { color: var(--hint); font-size: 12px; text-align: center; margin-top: 10px; }
+.loading { color: var(--hint); text-align: center; padding: 20px; }
+.error { color: var(--red); text-align: center; padding: 14px; font-size: 13px; }
+
+#equity-chart { width: 100%; height: 120px; display: block; }
+#equity-chart polyline { fill: none; stroke: var(--accent); stroke-width: 2; }
+#equity-chart .zero { stroke: var(--hint); stroke-width: 0.5; stroke-dasharray: 4 4; }
+
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--hint);
+  margin-left: 6px;
+}

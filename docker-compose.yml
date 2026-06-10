@@ -130,6 +130,44 @@ services:
         max-size: "20m"
         max-file: "3"
 
+  webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: webapp
+    container_name: crypto_webapp
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@timescaledb:5432/crypto_monitor?sslmode=disable
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  cloudflared:
+    # Starts only when COMPOSE_PROFILES=tunnel is set in the server .env
+    # (needs TUNNEL_TOKEN there too).
+    image: cloudflare/cloudflared:latest
+    container_name: crypto_cloudflared
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      - webapp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+
 volumes:
   timescaledb_data:
   redis_data:
