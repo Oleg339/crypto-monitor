@@ -29,12 +29,13 @@ var tradeSyncSchema = []string{
 }
 
 type tradeSync struct {
-	pool  *pgxpool.Pool
-	bybit *BybitClient
+	pool   *pgxpool.Pool
+	bybit  *BybitClient
+	safety *liveSafety // nil in paper mode (paper has its own SafetyChecker)
 }
 
-func runTradeSync(ctx context.Context, pool *pgxpool.Pool, bybit *BybitClient) {
-	ts := &tradeSync{pool: pool, bybit: bybit}
+func runTradeSync(ctx context.Context, pool *pgxpool.Pool, bybit *BybitClient, safety *liveSafety) {
+	ts := &tradeSync{pool: pool, bybit: bybit, safety: safety}
 
 	for _, stmt := range tradeSyncSchema {
 		if _, err := pool.Exec(ctx, stmt); err != nil {
@@ -47,6 +48,7 @@ func runTradeSync(ctx context.Context, pool *pgxpool.Pool, bybit *BybitClient) {
 		log.Printf("[tradesync] backfill: %v", err)
 	} else {
 		log.Printf("[tradesync] backfill %s: %d new closed trades", tradeSyncBackfill, n)
+		ts.afterSync(ctx, n)
 	}
 
 	tick := time.NewTicker(tradeSyncInterval)
@@ -58,10 +60,19 @@ func runTradeSync(ctx context.Context, pool *pgxpool.Pool, bybit *BybitClient) {
 		case <-tick.C:
 			if n, err := ts.syncRange(ctx, tradeSyncWindow); err != nil {
 				log.Printf("[tradesync] sync: %v", err)
-			} else if n > 0 {
-				log.Printf("[tradesync] %d new closed trades", n)
+			} else {
+				if n > 0 {
+					log.Printf("[tradesync] %d new closed trades", n)
+				}
+				ts.afterSync(ctx, n)
 			}
 		}
+	}
+}
+
+func (ts *tradeSync) afterSync(ctx context.Context, newTrades int) {
+	if ts.safety != nil {
+		ts.safety.runChecks(ctx, newTrades > 0)
 	}
 }
 

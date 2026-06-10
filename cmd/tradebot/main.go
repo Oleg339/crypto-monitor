@@ -129,13 +129,24 @@ func main() {
 		} else {
 			log.Println("[signals] DB connected — signal logging enabled")
 		}
-		go runTradeSync(ctx, paper.pool, bybit)
-		log.Println("[tradesync] closed-trade sync started")
 	} else if cfg.PaperTrading {
 		log.Fatal("[config] PAPER_TRADING=true requires DATABASE_URL to be set")
 	}
 
 	bot := newBot(cfg, bybit, paper)
+
+	if paper != nil {
+		// Mirror real closed trades into the DB; in live mode the sync also
+		// drives the safety rules (loss streak, rolling winrate, min equity).
+		var safety *liveSafety
+		if !cfg.PaperTrading {
+			safety = newLiveSafety(paper.pool, bot, bybit, cfg)
+			log.Printf("[livesafety] enabled: loss streak %d, rolling winrate <30%% (окно %d), MIN_EQUITY=%.0f",
+				int(getenvF("LOSS_STREAK_PAUSE", 4)), rollingWindow, cfg.MinEquity)
+		}
+		go runTradeSync(ctx, paper.pool, bybit, safety)
+		log.Println("[tradesync] closed-trade sync started")
+	}
 
 	if cfg.PaperTrading {
 		safety := newSafetyChecker(paper, bot, bybit, cfg)
