@@ -32,6 +32,7 @@ type WSClient struct {
 	conn       *websocket.Conn
 	mu         sync.RWMutex
 	handlers   map[string]MessageHandler
+	onConnect  func(c *WSClient) error
 	semaphore  chan struct{}
 	reconnects int64
 	messages   int64
@@ -49,6 +50,37 @@ func NewWSClient(wsURL string) *WSClient {
 		handlers:  make(map[string]MessageHandler),
 		semaphore: make(chan struct{}, semaphoreSize),
 	}
+}
+
+// SetOnConnect registers a callback invoked after every (re)connect, before
+// the read loop starts. Use it for auth and (re)subscribing. A returned error
+// drops the connection and retries with backoff.
+func (c *WSClient) SetOnConnect(fn func(c *WSClient) error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onConnect = fn
+}
+
+// Send marshals v to JSON and writes it to the connection.
+func (c *WSClient) Send(v any) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("ws: marshal: %w", err)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn == nil {
+		return fmt.Errorf("ws: not connected")
+	}
+	return c.conn.WriteMessage(websocket.TextMessage, data)
+}
+
+// Unsubscribe sends an unsubscribe message for the given topics.
+func (c *WSClient) Unsubscribe(topics []string) error {
+	if len(topics) == 0 {
+		return nil
+	}
+	return c.Send(WSSubscribeMessage{Op: "unsubscribe", Args: topics})
 }
 
 // OnMessage registers a handler for topics that start with prefix.
@@ -143,6 +175,21 @@ func (c *WSClient) Run(ctx context.Context) error {
 
 		atomic.AddInt64(&c.reconnects, 1)
 		slog.Info("ws: connected", "url", c.url)
+
+		c.mu.RLock()
+		onConnect := c.onConnect
+		c.mu.RUnlock()
+		if onConnect != nil {
+			if err := onConnect(c); err != nil {
+				slog.Error("ws: on-connect hook failed", "err", err)
+				c.closeConn()
+				if !sleep(ctx, backoff) {
+					return ctx.Err()
+				}
+				backoff = nextBackoff(backoff)
+				continue
+			}
+		}
 		backoff = initialBackoff
 
 		if err := c.readLoop(ctx); err != nil {

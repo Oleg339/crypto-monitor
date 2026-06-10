@@ -142,15 +142,48 @@ function renderStats(st, el) {
     statCell(pnlSpan(st.avgPct, "%", 1), "Сред.");
 }
 
+function renderOverview(ov) {
+  renderBalance(ov.balance);
+  renderPositions(ov.positions);
+  $("updated-text").textContent = "Обновлено " + new Date(ov.updatedAt).toLocaleTimeString("ru-RU");
+}
+
 async function loadOverview() {
   try {
-    const ov = await api("/api/overview");
-    renderBalance(ov.balance);
-    renderPositions(ov.positions);
-    $("updated").textContent = "Обновлено " + new Date(ov.updatedAt).toLocaleTimeString("ru-RU");
+    renderOverview(await api("/api/overview"));
   } catch (e) {
     $("balance-card").innerHTML = `<div class="error">Ошибка: ${e.message}</div>`;
   }
+}
+
+// ── Живые обновления по WebSocket ────────────────────────────────────────────
+
+let wsLive = false;
+let wsRetry = 2000;
+
+function connectLive() {
+  if (!tg.initData) return; // вне Telegram остаёмся на поллинге
+  let ws;
+  try {
+    ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+  } catch (e) { return; }
+
+  ws.onopen = () => ws.send(JSON.stringify({ initData: tg.initData }));
+  ws.onmessage = (ev) => {
+    let ov;
+    try { ov = JSON.parse(ev.data); } catch (e) { return; }
+    wsLive = true;
+    wsRetry = 2000;
+    $("live-dot").classList.add("on");
+    renderOverview(ov);
+  };
+  ws.onclose = () => {
+    wsLive = false;
+    $("live-dot").classList.remove("on");
+    wsRetry = Math.min(wsRetry * 2, 30000);
+    setTimeout(connectLive, wsRetry);
+  };
+  ws.onerror = () => ws.close();
 }
 
 async function loadStats() {
@@ -323,5 +356,7 @@ $("refresh").addEventListener("click", async () => {
 loadOverview();
 loadEquity();
 loadStats();
-setInterval(loadOverview, 10000);
+connectLive();
+// Поллинг — только как фолбэк, пока нет живого WS-соединения.
+setInterval(() => { if (!wsLive) loadOverview(); }, 10000);
 setInterval(loadStats, 60000);

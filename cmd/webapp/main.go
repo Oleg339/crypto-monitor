@@ -84,9 +84,13 @@ func main() {
 		allowedID: chatID,
 	}
 
+	hub := newLiveHub(s)
+	go hub.run(context.Background(), getenv("BYBIT_TESTNET", "false") == "true")
+
 	staticFS, _ := fs.Sub(webFS, "web")
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
+	mux.HandleFunc("/ws", hub.handleWS)
 	mux.HandleFunc("/api/overview", s.authMiddleware(s.handleOverview))
 	mux.HandleFunc("/api/trades", s.authMiddleware(s.handleTrades))
 	mux.HandleFunc("/api/signals", s.authMiddleware(s.handleSignals))
