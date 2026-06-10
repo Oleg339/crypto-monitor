@@ -137,6 +137,8 @@ services:
       target: webapp
     container_name: crypto_webapp
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8081"   # Tailscale Funnel proxies to this
     env_file:
       - .env
     environment:
