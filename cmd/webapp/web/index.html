@@ -2,40 +2,69 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Trading Bot</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <header id="topbar">
+    <div>
+      <div id="app-title">Trading Bot</div>
+      <div id="updated">&nbsp;</div>
+    </div>
+    <button id="refresh" aria-label="Обновить">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/>
+      </svg>
+    </button>
+  </header>
+
   <nav id="tabs">
     <button class="tab active" data-tab="overview">Обзор</button>
     <button class="tab" data-tab="trades">Сделки</button>
     <button class="tab" data-tab="signals">Сигналы</button>
+    <span id="tab-glider"></span>
   </nav>
 
   <main>
     <section id="overview" class="page active">
-      <div id="balance-card" class="card">
-        <div class="loading">Загрузка…</div>
+      <div id="balance-card" class="hero">
+        <div class="skel skel-lg"></div>
+        <div class="skel skel-sm"></div>
       </div>
-      <div class="card">
-        <h2>Equity (Σ PnL %)</h2>
-        <svg id="equity-chart" viewBox="0 0 320 120" preserveAspectRatio="none"></svg>
+
+      <div id="stat-grid" class="stat-grid"></div>
+
+      <div class="card chart-card">
+        <div class="card-title-row">
+          <h2>Equity · Σ PnL %</h2>
+          <span id="equity-last" class="chart-last"></span>
+        </div>
+        <div id="equity-wrap">
+          <svg id="equity-chart" viewBox="0 0 340 140" preserveAspectRatio="none"></svg>
+          <div id="equity-axis"></div>
+        </div>
       </div>
-      <h2>Открытые позиции</h2>
-      <div id="positions"></div>
-      <div id="updated" class="muted"></div>
+
+      <h2 class="section-h">Открытые позиции <span id="pos-count" class="count"></span></h2>
+      <div id="positions"><div class="skel skel-card"></div></div>
     </section>
 
     <section id="trades" class="page">
-      <h2>История сделок</h2>
-      <div id="trades-list"><div class="loading">Загрузка…</div></div>
+      <div id="trade-stats" class="stat-grid"></div>
+      <div class="filters" id="trade-filters">
+        <button class="chip active" data-f="all">Все</button>
+        <button class="chip" data-f="win">Прибыльные</button>
+        <button class="chip" data-f="loss">Убыточные</button>
+        <button class="chip" data-f="open">Открытые</button>
+      </div>
+      <div id="trades-list"><div class="skel skel-card"></div><div class="skel skel-card"></div></div>
     </section>
 
     <section id="signals" class="page">
-      <h2>Сигналы</h2>
-      <div id="signals-list"><div class="loading">Загрузка…</div></div>
+      <h2 class="section-h">Последние сигналы</h2>
+      <div id="signals-list"><div class="skel skel-card"></div><div class="skel skel-card"></div></div>
     </section>
   </main>
 

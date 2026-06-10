@@ -81,6 +81,40 @@ func loadSignals(ctx context.Context, db *pgxpool.Pool, limit int) ([]signal, er
 	return out, rows.Err()
 }
 
+type stats struct {
+	Closed   int      `json:"closed"`
+	Open     int      `json:"open"`
+	Wins     int      `json:"wins"`
+	WinRate  *float64 `json:"winRate"` // nil until there is at least one closed trade
+	TotalPct float64  `json:"totalPct"`
+	AvgPct   float64  `json:"avgPct"`
+	BestPct  float64  `json:"bestPct"`
+	WorstPct float64  `json:"worstPct"`
+}
+
+func loadStats(ctx context.Context, db *pgxpool.Pool) (*stats, error) {
+	const q = `
+		SELECT
+			COUNT(*) FILTER (WHERE status = 'closed'),
+			COUNT(*) FILTER (WHERE status <> 'closed'),
+			COUNT(*) FILTER (WHERE status = 'closed' AND pnl_pct > 0),
+			COALESCE(SUM(pnl_pct) FILTER (WHERE status = 'closed'), 0),
+			COALESCE(AVG(pnl_pct) FILTER (WHERE status = 'closed'), 0),
+			COALESCE(MAX(pnl_pct) FILTER (WHERE status = 'closed'), 0),
+			COALESCE(MIN(pnl_pct) FILTER (WHERE status = 'closed'), 0)
+		FROM positions`
+	var st stats
+	if err := db.QueryRow(ctx, q).Scan(&st.Closed, &st.Open, &st.Wins,
+		&st.TotalPct, &st.AvgPct, &st.BestPct, &st.WorstPct); err != nil {
+		return nil, err
+	}
+	if st.Closed > 0 {
+		wr := float64(st.Wins) / float64(st.Closed) * 100
+		st.WinRate = &wr
+	}
+	return &st, nil
+}
+
 type equityPoint struct {
 	Time   time.Time `json:"time"`
 	CumPct float64   `json:"cumPct"`

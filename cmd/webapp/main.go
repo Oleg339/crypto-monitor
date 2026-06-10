@@ -80,6 +80,7 @@ func main() {
 	mux.HandleFunc("/api/trades", s.authMiddleware(s.handleTrades))
 	mux.HandleFunc("/api/signals", s.authMiddleware(s.handleSignals))
 	mux.HandleFunc("/api/equity", s.authMiddleware(s.handleEquity))
+	mux.HandleFunc("/api/stats", s.authMiddleware(s.handleStats))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -159,6 +160,15 @@ func (s *server) handleSignals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, signals)
+}
+
+func (s *server) handleStats(w http.ResponseWriter, r *http.Request) {
+	st, err := loadStats(r.Context(), s.db)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, st)
 }
 
 func (s *server) handleEquity(w http.ResponseWriter, r *http.Request) {

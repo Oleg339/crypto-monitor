@@ -1,133 +1,319 @@
 :root {
-  --bg: var(--tg-theme-bg-color, #18222d);
-  --card: var(--tg-theme-secondary-bg-color, #232e3c);
-  --text: var(--tg-theme-text-color, #f5f5f5);
-  --hint: var(--tg-theme-hint-color, #708499);
-  --accent: var(--tg-theme-button-color, #5288c1);
-  --green: #4caf7d;
-  --red: #e05c5c;
+  --bg: var(--tg-theme-bg-color, #141c26);
+  --card: var(--tg-theme-secondary-bg-color, #1e2936);
+  --text: var(--tg-theme-text-color, #f2f5f8);
+  --hint: var(--tg-theme-hint-color, #7d93ab);
+  --accent: var(--tg-theme-button-color, #58a6ff);
+  --green: #2ecc8f;
+  --red: #ff5e73;
+  --line: rgba(125, 147, 171, 0.16);
+  --radius: 16px;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: var(--bg);
   color: var(--text);
   font-size: 15px;
-  padding-bottom: 24px;
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+  -webkit-tap-highlight-color: transparent;
 }
 
-#tabs {
+/* ── Шапка ── */
+#topbar {
   display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px 8px;
+}
+#app-title { font-size: 19px; font-weight: 700; letter-spacing: -0.2px; }
+#updated { font-size: 12px; color: var(--hint); margin-top: 2px; }
+
+#refresh {
+  width: 38px; height: 38px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--hint);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+#refresh:active { color: var(--accent); }
+#refresh.spin svg { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Вкладки ── */
+#tabs {
   position: sticky;
   top: 0;
-  background: var(--bg);
   z-index: 10;
-  border-bottom: 1px solid var(--card);
+  display: flex;
+  margin: 6px 16px 14px;
+  padding: 4px;
+  background: var(--card);
+  border-radius: 13px;
+  border: 1px solid var(--line);
 }
-
 .tab {
   flex: 1;
-  padding: 12px 0;
+  position: relative;
+  z-index: 1;
+  padding: 9px 0;
   background: none;
   border: none;
+  border-radius: 10px;
   color: var(--hint);
-  font-size: 15px;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
+  transition: color 0.25s;
+}
+.tab.active { color: var(--text); }
+#tab-glider {
+  position: absolute;
+  top: 4px; bottom: 4px;
+  width: calc((100% - 8px) / 3);
+  left: 4px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 28%, var(--card));
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.tab.active {
-  color: var(--accent);
-  border-bottom: 2px solid var(--accent);
-}
-
-main { padding: 12px; }
+main { padding: 0 16px; }
 
 .page { display: none; }
-.page.active { display: block; }
+.page.active { display: block; animation: fadeUp 0.3s ease; }
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
 
+/* ── Карточки ── */
 .card {
   background: var(--card);
-  border-radius: 12px;
-  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
   margin-bottom: 12px;
 }
 
-h2 {
-  font-size: 14px;
+h2, .section-h {
+  font-size: 12px;
   color: var(--hint);
-  font-weight: 600;
-  margin: 10px 0 8px;
+  font-weight: 700;
+  margin: 16px 0 8px;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.6px;
+}
+.card h2 { margin: 0; }
+.card-title-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 8px;
+}
+.count { color: var(--accent); }
+
+/* ── Hero-карточка баланса ── */
+.hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  padding: 18px 16px 14px;
+  margin-bottom: 12px;
+  background:
+    radial-gradient(120% 160% at 0% 0%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 60%),
+    var(--card);
+}
+.hero-label { font-size: 12px; color: var(--hint); text-transform: uppercase; letter-spacing: 0.6px; }
+.hero-equity {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  margin: 2px 0 4px;
+  font-variant-numeric: tabular-nums;
+}
+.hero-pnl {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+.hero-pnl.up { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+.hero-pnl.down { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); }
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.hero-grid .lbl { font-size: 12px; color: var(--hint); }
+.hero-grid .val { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ── Сетка статистики ── */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.stat {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 6px;
+  text-align: center;
+}
+.stat .v { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat .l { font-size: 10.5px; color: var(--hint); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.3px; }
+
+/* ── График ── */
+.chart-card { padding-bottom: 10px; }
+.chart-last { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+#equity-wrap { position: relative; }
+#equity-chart { width: 100%; height: 140px; display: block; }
+#equity-axis {
+  display: flex; justify-content: space-between;
+  font-size: 10.5px; color: var(--hint); margin-top: 4px;
 }
 
-.balance-equity { font-size: 28px; font-weight: 700; }
-.balance-row {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 6px;
-  font-size: 14px;
-  color: var(--hint);
-}
-.balance-row b { color: var(--text); font-weight: 500; }
-
+/* ── Позиции ── */
 .pos {
   background: var(--card);
-  border-radius: 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--hint);
+  border-radius: 14px;
   padding: 12px 14px;
   margin-bottom: 8px;
 }
+.pos.long { border-left-color: var(--green); }
+.pos.short { border-left-color: var(--red); }
 
-.pos-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-}
-
+.pos-head { display: flex; justify-content: space-between; align-items: baseline; }
 .pos-symbol { font-weight: 700; font-size: 16px; }
-.side-buy { color: var(--green); font-size: 12px; font-weight: 600; }
-.side-sell { color: var(--red); font-size: 12px; font-weight: 600; }
+.pos-pnl { text-align: right; }
+.pos-pnl .roe { display: block; font-size: 11.5px; color: var(--hint); font-weight: 500; }
+
+.dir {
+  font-size: 11px; font-weight: 700;
+  padding: 2px 7px; border-radius: 6px;
+  margin-left: 6px; vertical-align: 1px;
+}
+.dir.long { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+.dir.short { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); }
 
 .pos-detail {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 6px;
-  font-size: 13px;
-  color: var(--hint);
+  display: flex; justify-content: space-between;
+  margin-top: 7px; font-size: 12.5px; color: var(--hint);
+  font-variant-numeric: tabular-nums;
+}
+.pos-detail b { color: var(--text); font-weight: 600; }
+
+/* шкала SL ←→ TP */
+.range { margin-top: 10px; }
+.range-bar {
+  position: relative; height: 4px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--red), var(--hint) 50%, var(--green));
+  opacity: 0.85;
+}
+.range-mark {
+  position: absolute; top: 50%;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--text);
+  border: 2px solid var(--bg);
+  transform: translate(-50%, -50%);
+}
+.range-labels {
+  display: flex; justify-content: space-between;
+  font-size: 10.5px; color: var(--hint); margin-top: 4px;
+  font-variant-numeric: tabular-nums;
 }
 
-.pnl-pos { color: var(--green); font-weight: 600; }
-.pnl-neg { color: var(--red); font-weight: 600; }
-
+/* ── Списки (сделки / сигналы) ── */
 .row {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
   background: var(--card);
-  border-radius: 10px;
-  padding: 10px 14px;
-  margin-bottom: 6px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 11px 14px;
+  margin-bottom: 7px;
   font-size: 14px;
 }
+.row .main { min-width: 0; }
+.row .sub { color: var(--hint); font-size: 12px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.row .right { text-align: right; flex-shrink: 0; }
+.row .right .sub { margin-top: 2px; }
 
-.row .sub { color: var(--hint); font-size: 12px; margin-top: 2px; }
-
-.muted { color: var(--hint); font-size: 12px; text-align: center; margin-top: 10px; }
-.loading { color: var(--hint); text-align: center; padding: 20px; }
-.error { color: var(--red); text-align: center; padding: 14px; font-size: 13px; }
-
-#equity-chart { width: 100%; height: 120px; display: block; }
-#equity-chart polyline { fill: none; stroke: var(--accent); stroke-width: 2; }
-#equity-chart .zero { stroke: var(--hint); stroke-width: 0.5; stroke-dasharray: 4 4; }
+.pnl-pos { color: var(--green); font-weight: 700; font-variant-numeric: tabular-nums; }
+.pnl-neg { color: var(--red); font-weight: 700; font-variant-numeric: tabular-nums; }
 
 .badge {
   display: inline-block;
-  font-size: 11px;
-  padding: 1px 7px;
-  border-radius: 8px;
-  background: var(--bg);
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--hint) 16%, transparent);
   color: var(--hint);
-  margin-left: 6px;
+  margin-left: 5px;
+  vertical-align: 1px;
 }
+.badge.accent { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+
+/* ── Фильтры ── */
+.filters { display: flex; gap: 6px; margin-bottom: 10px; overflow-x: auto; }
+.chip {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--hint);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+.chip.active {
+  background: color-mix(in srgb, var(--accent) 24%, var(--card));
+  border-color: transparent;
+  color: var(--text);
+}
+
+/* ── Служебное ── */
+.muted { color: var(--hint); font-size: 13px; text-align: center; padding: 18px 0; }
+.error {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 25%, transparent);
+  border-radius: 12px;
+  text-align: center;
+  padding: 12px;
+  font-size: 13px;
+}
+
+/* скелетоны загрузки */
+.skel {
+  border-radius: 10px;
+  background: linear-gradient(90deg, var(--card) 25%, color-mix(in srgb, var(--hint) 14%, var(--card)) 50%, var(--card) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.3s infinite;
+  margin-bottom: 8px;
+}
+.skel-lg { height: 38px; width: 60%; }
+.skel-sm { height: 16px; width: 40%; }
+.skel-card { height: 64px; }
+@keyframes shimmer { to { background-position: -200% 0; } }
