@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -24,6 +25,9 @@ type server struct {
 	db        *pgxpool.Pool
 	botToken  string
 	allowedID int64
+	// Backtest expectations, for "is the live winrate still plausible" checks.
+	expWinRate float64
+	expAvgPnl  float64
 
 	mu        sync.Mutex
 	cached    overview
@@ -77,11 +81,17 @@ func main() {
 		}
 	}
 
+	// Same defaults as the tradebot's safety rules.
+	expWin, _ := strconv.ParseFloat(getenv("BACKTEST_WIN_RATE", "60.7"), 64)
+	expAvg, _ := strconv.ParseFloat(getenv("BACKTEST_AVG_PNL", "4.80"), 64)
+
 	s := &server{
-		bybit:     newBybitClient(base, getenv("BYBIT_API_KEY", ""), getenv("BYBIT_API_SECRET", "")),
-		db:        db,
-		botToken:  botToken,
-		allowedID: chatID,
+		bybit:      newBybitClient(base, getenv("BYBIT_API_KEY", ""), getenv("BYBIT_API_SECRET", "")),
+		db:         db,
+		botToken:   botToken,
+		allowedID:  chatID,
+		expWinRate: expWin,
+		expAvgPnl:  expAvg,
 	}
 
 	hub := newLiveHub(s)
@@ -183,7 +193,48 @@ func (s *server) handleStats(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, st)
+	resp := struct {
+		*stats
+		ExpWinRate *float64 `json:"expWinRate,omitempty"`
+		ExpAvgPnl  *float64 `json:"expAvgPnl,omitempty"`
+		// WinRateP is P(wins <= observed) assuming the backtest winrate is
+		// true: how plausible the current drawdown is as pure chance.
+		WinRateP *float64 `json:"winRateP,omitempty"`
+	}{stats: st}
+	if s.expWinRate > 0 {
+		resp.ExpWinRate = &s.expWinRate
+		if st.Closed > 0 {
+			p := pBinomLE(st.Wins, st.Closed, s.expWinRate/100)
+			resp.WinRateP = &p
+		}
+	}
+	if s.expAvgPnl != 0 {
+		resp.ExpAvgPnl = &s.expAvgPnl
+	}
+	writeJSON(w, resp)
+}
+
+// pBinomLE returns P(X <= k) for X ~ Binomial(n, p).
+func pBinomLE(k, n int, p float64) float64 {
+	if n <= 0 || p <= 0 {
+		return 1
+	}
+	if p >= 1 {
+		if k >= n {
+			return 1
+		}
+		return 0
+	}
+	q := 1 - p
+	term := math.Pow(q, float64(n))
+	sum := 0.0
+	for i := 0; i <= k && i <= n; i++ {
+		if i > 0 {
+			term *= float64(n-i+1) / float64(i) * p / q
+		}
+		sum += term
+	}
+	return math.Min(sum, 1)
 }
 
 func (s *server) handleEquity(w http.ResponseWriter, r *http.Request) {

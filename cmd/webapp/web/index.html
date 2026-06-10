@@ -13,11 +13,18 @@
       <div id="app-title">Trading Bot</div>
       <div id="updated"><span id="live-dot"></span><span id="updated-text">&nbsp;</span></div>
     </div>
-    <button id="refresh" aria-label="Обновить">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-        <path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/>
-      </svg>
-    </button>
+    <div class="topbar-actions">
+      <button id="zen-btn" class="icon-btn" aria-label="Дзен-режим">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+        </svg>
+      </button>
+      <button id="refresh" class="icon-btn" aria-label="Обновить">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/>
+        </svg>
+      </button>
+    </div>
   </header>
 
   <nav id="tabs">
@@ -35,6 +42,7 @@
       </div>
 
       <div id="stat-grid" class="stat-grid"></div>
+      <div id="expectation" class="expectation" style="display:none"></div>
 
       <div class="card chart-card">
         <div class="card-title-row">

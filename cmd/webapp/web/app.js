@@ -19,6 +19,13 @@ async function api(path) {
   return resp.json();
 }
 
+// ── Дзен-режим ───────────────────────────────────────────────────────────────
+// Прячет деньги и нереализованный PnL, приглушает цвета, тормозит live-поток.
+// Информация о здоровье системы (винрейт vs бэктест) остаётся всегда.
+
+let zen = localStorage.getItem("zen") === "1";
+const ZEN_RENDER_EVERY = 60000;
+
 // ── Форматирование ───────────────────────────────────────────────────────────
 
 const fmt = (n, d = 2) =>
@@ -63,6 +70,23 @@ const dirBadge = (dir) => {
 
 // ── Обзор ────────────────────────────────────────────────────────────────────
 
+let lastOv = null;
+let lastStatsData = null;
+let lastEquityPts = null;
+let lastZenRender = 0;
+
+function renderOverview(ov) {
+  lastOv = ov;
+  lastZenRender = Date.now();
+  if (zen) {
+    renderHeroZen(ov);
+  } else {
+    renderBalance(ov.balance);
+  }
+  renderPositions(ov.positions);
+  $("updated-text").textContent = "Обновлено " + new Date(ov.updatedAt).toLocaleTimeString("ru-RU");
+}
+
 function renderBalance(b) {
   const upnlPct = b.walletBalance ? (b.unrealisedPnl / b.walletBalance) * 100 : 0;
   const up = b.unrealisedPnl >= 0;
@@ -77,6 +101,17 @@ function renderBalance(b) {
       <div><div class="lbl">Доступно</div><div class="val">$${fmt(b.available)}</div></div>
       <div><div class="lbl">Нереализ. PnL</div><div class="val">${pnlSpan(b.unrealisedPnl)}</div></div>
       <div><div class="lbl">В позициях</div><div class="val">$${fmt(b.walletBalance - b.available)}</div></div>
+    </div>`;
+}
+
+function renderHeroZen(ov) {
+  const fresh = Date.now() - new Date(ov.updatedAt) < 5 * 60 * 1000;
+  $("balance-card").innerHTML = `
+    <div class="hero-label">Дзен-режим</div>
+    <div class="hero-equity zen-title">${fresh ? "Алгоритм работает" : "Нет свежих данных"}</div>
+    <div class="hero-grid">
+      <div><div class="lbl">Открытых позиций</div><div class="val">${ov.positions.length}</div></div>
+      <div><div class="lbl">Данные</div><div class="val">${new Date(ov.updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</div></div>
     </div>`;
 }
 
@@ -112,20 +147,26 @@ function renderPositions(positions) {
         </div>`;
     }
 
+    // В дзене — без нереализованного PnL и денежных сумм: позиция закроется
+    // по SL/TP сама, эта цифра не требует решений.
+    const pnlBlock = zen ? "" : `
+      <span class="pos-pnl">${pnlSpan(p.unrealisedPnl)}
+        <span class="roe">ROE ${pnlSpan(roe, "%", 1)}</span>
+      </span>`;
+    const valueBlock = zen ? "" : `<span>Объём <b>$${fmt(value, 0)}</b></span>`;
+
     return `
       <div class="pos ${long ? "long" : "short"}">
         <div class="pos-head">
           <span class="pos-symbol">${p.symbol}${dirBadge(p.side)}
             <span class="badge">${fmt(p.leverage, 0)}x</span>
           </span>
-          <span class="pos-pnl">${pnlSpan(p.unrealisedPnl)}
-            <span class="roe">ROE ${pnlSpan(roe, "%", 1)}</span>
-          </span>
+          ${pnlBlock}
         </div>
         <div class="pos-detail">
           <span>Вход <b>$${fmtPrice(p.entryPrice)}</b></span>
           <span>Марк <b>$${fmtPrice(p.markPrice)}</b></span>
-          <span>Объём <b>$${fmt(value, 0)}</b></span>
+          ${valueBlock}
         </div>
         ${range}
       </div>`;
@@ -134,18 +175,42 @@ function renderPositions(positions) {
 
 const statCell = (v, l) => `<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`;
 
-function renderStats(st, el) {
-  el.innerHTML =
+function renderStats(st) {
+  $("stat-grid").innerHTML =
     statCell(st.winRate != null ? fmt(st.winRate, 0) + "%" : "—", "Винрейт") +
     statCell(`${st.closed}<small style="color:var(--hint)">+${st.open}</small>`, "Сделок") +
     statCell(pnlSpan(st.totalPct, "%", 1), "Σ PnL") +
     statCell(pnlSpan(st.avgPct, "%", 1), "Сред.");
+  renderExpectation(st);
 }
 
-function renderOverview(ov) {
-  renderBalance(ov.balance);
-  renderPositions(ov.positions);
-  $("updated-text").textContent = "Обновлено " + new Date(ov.updatedAt).toLocaleTimeString("ru-RU");
+// renderExpectation compares the live winrate with the backtest expectation.
+// This stays visible in zen mode: it is the rational "do I need to look at
+// the system" signal, not an emotional one.
+function renderExpectation(st) {
+  const el = $("expectation");
+  if (st.expWinRate == null || !st.closed) {
+    el.style.display = "none";
+    return;
+  }
+  const ok = st.winRateP == null || st.winRateP >= 0.05;
+  el.style.display = "";
+  el.className = "expectation " + (ok ? "calm" : "warn");
+  const exp = `Бэктест: винрейт ${fmt(st.expWinRate, 0)}%` +
+    (st.expAvgPnl != null ? `, сред. ${fmt(st.expAvgPnl, 1)}%` : "");
+  const now = `Сейчас ${fmt(st.winRate, 0)}% на ${st.closed} сделках`;
+  const verdict = ok
+    ? "отклонение в пределах случайности — вмешательство не требуется"
+    : "ниже ожидаемого диапазона — стоит проверить систему";
+  el.innerHTML = `<b>${exp}.</b> ${now} — ${verdict}.`;
+}
+
+function renderTradeStats(st) {
+  $("trade-stats").innerHTML =
+    statCell(st.winRate != null ? fmt(st.winRate, 0) + "%" : "—", "Винрейт") +
+    statCell(String(st.closed), "Закрыто") +
+    statCell(pnlSpan(st.bestPct, "%", 1), "Лучшая") +
+    statCell(pnlSpan(st.worstPct, "%", 1), "Худшая");
 }
 
 async function loadOverview() {
@@ -154,6 +219,15 @@ async function loadOverview() {
   } catch (e) {
     $("balance-card").innerHTML = `<div class="error">Ошибка: ${e.message}</div>`;
   }
+}
+
+async function loadStats() {
+  try {
+    const st = await api("/api/stats");
+    lastStatsData = st;
+    renderStats(st);
+    if (loaded.trades) renderTradeStats(st);
+  } catch (e) { /* статистика не критична */ }
 }
 
 // ── Живые обновления по WebSocket ────────────────────────────────────────────
@@ -174,7 +248,10 @@ function connectLive() {
     try { ov = JSON.parse(ev.data); } catch (e) { return; }
     wsLive = true;
     wsRetry = 2000;
-    $("live-dot").classList.add("on");
+    $("live-dot").classList.toggle("on", !zen);
+    lastOv = ov;
+    // В дзене не тикаем каждые 0.7с — перерисовка раз в минуту.
+    if (zen && Date.now() - lastZenRender < ZEN_RENDER_EVERY) return;
     renderOverview(ov);
   };
   ws.onclose = () => {
@@ -186,65 +263,53 @@ function connectLive() {
   ws.onerror = () => ws.close();
 }
 
-async function loadStats() {
-  try {
-    const st = await api("/api/stats");
-    renderStats(st, $("stat-grid"));
-    if (loaded.trades) renderTradeStats(st);
-    lastStats = st;
-  } catch (e) { /* статистика не критична */ }
-}
-
-let lastStats = null;
-function renderTradeStats(st) {
-  $("trade-stats").innerHTML =
-    statCell(st.winRate != null ? fmt(st.winRate, 0) + "%" : "—", "Винрейт") +
-    statCell(String(st.closed), "Закрыто") +
-    statCell(pnlSpan(st.bestPct, "%", 1), "Лучшая") +
-    statCell(pnlSpan(st.worstPct, "%", 1), "Худшая");
-}
-
 // ── График equity ────────────────────────────────────────────────────────────
+
+function renderEquity(pts) {
+  lastEquityPts = pts;
+  const svg = $("equity-chart");
+  if (!svg) return;
+  if (pts.length < 2) {
+    $("equity-wrap").innerHTML = `<div class="muted">Недостаточно закрытых сделок для графика</div>`;
+    return;
+  }
+  const W = 340, H = 140, padX = 4, padT = 12, padB = 6;
+  const vals = pts.map((p) => p.cumPct);
+  const last = vals[vals.length - 1];
+  const min = Math.min(0, ...vals), max = Math.max(0, ...vals);
+  const x = (i) => padX + (i / (pts.length - 1)) * (W - 2 * padX);
+  const y = (v) => H - padB - ((v - min) / (max - min || 1)) * (H - padT - padB);
+
+  // В дзене линия нейтрального цвета: тренд виден, окраски «хорошо/плохо» нет.
+  const color = zen ? "var(--accent)" : (last >= 0 ? "var(--green)" : "var(--red)");
+  const line = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const area = `${padX},${y(0).toFixed(1)} ${line} ${x(vals.length - 1).toFixed(1)},${y(0).toFixed(1)}`;
+
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="eq-fill" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.35"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>
+      </linearGradient>
+    </defs>
+    <line x1="0" y1="${y(0)}" x2="${W}" y2="${y(0)}"
+      stroke="var(--hint)" stroke-width="0.6" stroke-dasharray="4 4" opacity="0.6"/>
+    <polygon points="${area}" fill="url(#eq-fill)"/>
+    <polyline points="${line}" fill="none" stroke="${color}" stroke-width="2"
+      stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${x(vals.length - 1)}" cy="${y(last)}" r="3.5" fill="${color}"
+      stroke="var(--bg)" stroke-width="1.5"/>`;
+
+  $("equity-last").innerHTML = pnlSpan(last, "%", 1);
+  $("equity-axis").innerHTML = `
+    <span>${fmtDate(pts[0].time)}</span>
+    <span>макс ${fmt(Math.max(...vals), 1)}% · мин ${fmt(Math.min(...vals), 1)}%</span>
+    <span>${fmtDate(pts[pts.length - 1].time)}</span>`;
+}
 
 async function loadEquity() {
   try {
-    const pts = await api("/api/equity");
-    const svg = $("equity-chart");
-    if (pts.length < 2) {
-      $("equity-wrap").innerHTML = `<div class="muted">Недостаточно закрытых сделок для графика</div>`;
-      return;
-    }
-    const W = 340, H = 140, padX = 4, padT = 12, padB = 6;
-    const vals = pts.map((p) => p.cumPct);
-    const last = vals[vals.length - 1];
-    const min = Math.min(0, ...vals), max = Math.max(0, ...vals);
-    const x = (i) => padX + (i / (pts.length - 1)) * (W - 2 * padX);
-    const y = (v) => H - padB - ((v - min) / (max - min || 1)) * (H - padT - padB);
-
-    const color = last >= 0 ? "var(--green)" : "var(--red)";
-    const line = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
-    const area = `${padX},${y(0).toFixed(1)} ${line} ${x(vals.length - 1).toFixed(1)},${y(0).toFixed(1)}`;
-
-    svg.innerHTML = `
-      <defs>
-        <linearGradient id="eq-fill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="${color}" stop-opacity="0.35"/>
-          <stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>
-        </linearGradient>
-      </defs>
-      <line x1="0" y1="${y(0)}" x2="${W}" y2="${y(0)}"
-        stroke="var(--hint)" stroke-width="0.6" stroke-dasharray="4 4" opacity="0.6"/>
-      <polygon points="${area}" fill="url(#eq-fill)"/>
-      <polyline points="${line}" fill="none" stroke="${color}" stroke-width="2"
-        stroke-linejoin="round" stroke-linecap="round"/>
-      <circle cx="${x(vals.length - 1)}" cy="${y(last)}" r="3.5" fill="${color}"
-        stroke="var(--bg)" stroke-width="1.5"/>`;
-
-    $("equity-last").innerHTML = pnlSpan(last, "%", 1);
-    $("equity-axis").innerHTML = `
-      <span>${fmtDate(pts[0].time)}</span>
-      <span>макс ${fmt(Math.max(...vals), 1)}% · мин ${fmt(Math.min(...vals), 1)}%</span>
-      <span>${fmtDate(pts[pts.length - 1].time)}</span>`;
+    renderEquity(await api("/api/equity"));
   } catch (e) { /* график не критичен */ }
 }
 
@@ -263,6 +328,7 @@ function renderTrades() {
   $("trades-list").innerHTML = list.length
     ? list.map((t) => {
       const dur = t.closedAt ? fmtDur(t.openedAt, t.closedAt) : "";
+      const usd = !zen && t.pnl != null ? " " + pnlSpan(t.pnl) : "";
       return `
       <div class="row">
         <div class="main">
@@ -272,7 +338,7 @@ function renderTrades() {
           <div class="sub">$${fmtPrice(t.entry)} → ${t.closePrice ? "$" + fmtPrice(t.closePrice) : "…"}</div>
         </div>
         <div class="right">
-          <div>${t.pnlPct != null ? pnlSpan(t.pnlPct, "%") : "—"}${t.pnl != null ? " " + pnlSpan(t.pnl) : ""}</div>
+          <div>${t.pnlPct != null ? pnlSpan(t.pnlPct, "%") : "—"}${usd}</div>
           <div class="sub">${fmtTime(t.closedAt || t.openedAt)}${dur && dur !== "0 мин" ? " · " + dur : ""}</div>
         </div>
       </div>`;
@@ -284,7 +350,7 @@ async function loadTrades() {
   try {
     allTrades = await api("/api/trades?limit=100");
     renderTrades();
-    if (lastStats) renderTradeStats(lastStats);
+    if (lastStatsData) renderTradeStats(lastStatsData);
   } catch (e) {
     $("trades-list").innerHTML = `<div class="error">Ошибка: ${e.message}</div>`;
   }
@@ -325,7 +391,7 @@ async function loadSignals() {
   }
 }
 
-// ── Вкладки, обновление ──────────────────────────────────────────────────────
+// ── Вкладки, дзен, обновление ────────────────────────────────────────────────
 
 const TABS = ["overview", "trades", "signals"];
 const loaded = {};
@@ -342,6 +408,23 @@ function show(tab) {
 document.querySelectorAll(".tab").forEach((b) =>
   b.addEventListener("click", () => show(b.dataset.tab)));
 
+function applyZen() {
+  document.body.classList.toggle("zen", zen);
+  $("zen-btn").classList.toggle("active", zen);
+  $("live-dot").classList.toggle("on", wsLive && !zen);
+  if (lastOv) renderOverview(lastOv);
+  if (lastStatsData) renderStats(lastStatsData);
+  if (lastEquityPts) renderEquity(lastEquityPts);
+  if (loaded.trades) renderTrades();
+}
+
+$("zen-btn").addEventListener("click", () => {
+  haptic("medium");
+  zen = !zen;
+  localStorage.setItem("zen", zen ? "1" : "0");
+  applyZen();
+});
+
 $("refresh").addEventListener("click", async () => {
   haptic("medium");
   const btn = $("refresh");
@@ -353,6 +436,8 @@ $("refresh").addEventListener("click", async () => {
   btn.classList.remove("spin");
 });
 
+document.body.classList.toggle("zen", zen);
+$("zen-btn").classList.toggle("active", zen);
 loadOverview();
 loadEquity();
 loadStats();
