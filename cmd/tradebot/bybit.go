@@ -374,6 +374,14 @@ type OpenOrder struct {
 	Price       float64
 	Qty         float64
 	CreatedTime time.Time
+	ReduceOnly  bool   // closes/reduces a position (SL/TP legs are reduce-only)
+	StopType    string // "StopLoss" / "TakeProfit" / "" for regular orders
+}
+
+// IsProtective reports whether the order guards an open position (SL/TP or
+// any reduce-only leg) rather than waiting to open one.
+func (o *OpenOrder) IsProtective() bool {
+	return o.ReduceOnly || o.StopType != ""
 }
 
 func (c *BybitClient) OpenOrders() ([]OpenOrder, error) {
@@ -383,12 +391,14 @@ func (c *BybitClient) OpenOrders() ([]OpenOrder, error) {
 	}
 	var res struct {
 		List []struct {
-			OrderID     string `json:"orderId"`
-			Symbol      string `json:"symbol"`
-			Side        string `json:"side"`
-			Price       string `json:"price"`
-			Qty         string `json:"qty"`
-			CreatedTime string `json:"createdTime"`
+			OrderID       string `json:"orderId"`
+			Symbol        string `json:"symbol"`
+			Side          string `json:"side"`
+			Price         string `json:"price"`
+			Qty           string `json:"qty"`
+			CreatedTime   string `json:"createdTime"`
+			ReduceOnly    bool   `json:"reduceOnly"`
+			StopOrderType string `json:"stopOrderType"`
 		} `json:"list"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
@@ -404,6 +414,8 @@ func (c *BybitClient) OpenOrders() ([]OpenOrder, error) {
 			Price:       pf(o.Price),
 			Qty:         pf(o.Qty),
 			CreatedTime: time.UnixMilli(ms).UTC(),
+			ReduceOnly:  o.ReduceOnly,
+			StopType:    o.StopOrderType,
 		})
 	}
 	return out, nil

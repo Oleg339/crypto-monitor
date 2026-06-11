@@ -22,6 +22,12 @@ func runLiveTTL(ctx context.Context, bybit *BybitClient, bot *Bot, cfg *Config) 
 		}
 		now := time.Now()
 		for _, o := range orders {
+			// TTL is only for stale *entry* orders. SL/TP and other
+			// reduce-only orders protect an open position and must live
+			// as long as the position does (см. инцидент с TRX 2026-06-11).
+			if o.IsProtective() {
+				continue
+			}
 			age := now.Sub(o.CreatedTime)
 			if age < ttl {
 				continue
