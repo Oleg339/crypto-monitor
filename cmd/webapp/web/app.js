@@ -3,6 +3,22 @@ tg.ready();
 tg.expand();
 try { tg.setHeaderColor("secondary_bg_color"); } catch (e) { /* старые клиенты */ }
 
+// В полноэкранном режиме контент уходит под статус-бар и кнопки Telegram.
+// Складываем safeAreaInset (чёлка/часы) + contentSafeAreaInset (кнопки
+// Telegram) в CSS-переменную --safe-top. В обычном режиме оба нулевые.
+function applySafeArea() {
+  const sa = tg.safeAreaInset, csa = tg.contentSafeAreaInset;
+  if (!sa && !csa) return; // старый клиент — остаётся env() из CSS
+  const top = ((sa && sa.top) || 0) + ((csa && csa.top) || 0);
+  document.documentElement.style.setProperty("--safe-top", top + "px");
+}
+try {
+  tg.onEvent("safeAreaChanged", applySafeArea);
+  tg.onEvent("contentSafeAreaChanged", applySafeArea);
+  tg.onEvent("fullscreenChanged", applySafeArea);
+  applySafeArea();
+} catch (e) { /* старые клиенты без safe-area API */ }
+
 const $ = (id) => document.getElementById(id);
 const haptic = (style = "light") => {
   try { tg.HapticFeedback.impactOccurred(style); } catch (e) { /* не критично */ }
@@ -88,14 +104,12 @@ function renderOverview(ov) {
 }
 
 function renderBalance(b) {
-  const upnlPct = b.walletBalance ? (b.unrealisedPnl / b.walletBalance) * 100 : 0;
-  const up = b.unrealisedPnl >= 0;
+  // Главная цифра под Equity — реализованный PnL (свершившийся итог).
+  // Нереализованный демотирован в сетку: это живой колеблющийся показатель.
   $("balance-card").innerHTML = `
     <div class="hero-label">Equity</div>
     <div class="hero-equity">$${fmt(b.equity)}</div>
-    <span class="hero-pnl ${up ? "up" : "down"}">
-      ${up ? "▲" : "▼"} ${fmt(Math.abs(b.unrealisedPnl))}$ · ${fmt(Math.abs(upnlPct))}%
-    </span>
+    ${realizedBadge()}
     <div class="hero-grid">
       <div><div class="lbl">Баланс кошелька</div><div class="val">$${fmt(b.walletBalance)}</div></div>
       <div><div class="lbl">Доступно</div><div class="val">$${fmt(b.available)}</div></div>
@@ -104,11 +118,22 @@ function renderBalance(b) {
     </div>`;
 }
 
+// realizedBadge — крупный «герой»-бейдж с реализованным PnL из последней
+// загруженной статистики. Возвращает "" пока статистики нет.
+function realizedBadge() {
+  const rp = lastStatsData ? lastStatsData.realizedPnl : null;
+  if (rp == null) return "";
+  const up = rp >= 0;
+  return `<span class="hero-pnl ${up ? "up" : "down"}">` +
+    `Реализ. PnL ${up ? "▲" : "▼"} ${fmt(Math.abs(rp))}$</span>`;
+}
+
 function renderHeroZen(ov) {
   const fresh = Date.now() - new Date(ov.updatedAt) < 5 * 60 * 1000;
   $("balance-card").innerHTML = `
     <div class="hero-label">Дзен-режим</div>
     <div class="hero-equity zen-title">${fresh ? "Алгоритм работает" : "Нет свежих данных"}</div>
+    ${realizedBadge()}
     <div class="hero-grid">
       <div><div class="lbl">Открытых позиций</div><div class="val">${ov.positions.length}</div></div>
       <div><div class="lbl">Данные</div><div class="val">${new Date(ov.updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</div></div>
@@ -227,6 +252,8 @@ async function loadStats() {
     lastStatsData = st;
     renderStats(st);
     if (loaded.trades) renderTradeStats(st);
+    // Реализованный PnL живёт в герое — перерисуем его свежими данными.
+    if (lastOv) renderOverview(lastOv);
   } catch (e) { /* статистика не критична */ }
 }
 

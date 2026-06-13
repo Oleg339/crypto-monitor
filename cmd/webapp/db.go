@@ -83,14 +83,15 @@ func loadSignals(ctx context.Context, db *pgxpool.Pool, limit int) ([]signal, er
 }
 
 type stats struct {
-	Closed   int      `json:"closed"`
-	Open     int      `json:"open"`
-	Wins     int      `json:"wins"`
-	WinRate  *float64 `json:"winRate"` // nil until there is at least one closed trade
-	TotalPct float64  `json:"totalPct"`
-	AvgPct   float64  `json:"avgPct"`
-	BestPct  float64  `json:"bestPct"`
-	WorstPct float64  `json:"worstPct"`
+	Closed      int      `json:"closed"`
+	Open        int      `json:"open"`
+	Wins        int      `json:"wins"`
+	WinRate     *float64 `json:"winRate"` // nil until there is at least one closed trade
+	TotalPct    float64  `json:"totalPct"`
+	AvgPct      float64  `json:"avgPct"`
+	BestPct     float64  `json:"bestPct"`
+	WorstPct    float64  `json:"worstPct"`
+	RealizedPnl float64  `json:"realizedPnl"` // Σ closed-trade PnL in USD
 }
 
 func loadStats(ctx context.Context, db *pgxpool.Pool) (*stats, error) {
@@ -102,11 +103,12 @@ func loadStats(ctx context.Context, db *pgxpool.Pool) (*stats, error) {
 			COALESCE(SUM(pnl_pct) FILTER (WHERE status = 'closed'), 0),
 			COALESCE(AVG(pnl_pct) FILTER (WHERE status = 'closed'), 0),
 			COALESCE(MAX(pnl_pct) FILTER (WHERE status = 'closed'), 0),
-			COALESCE(MIN(pnl_pct) FILTER (WHERE status = 'closed'), 0)
+			COALESCE(MIN(pnl_pct) FILTER (WHERE status = 'closed'), 0),
+			COALESCE(SUM(pnl) FILTER (WHERE status = 'closed'), 0)
 		FROM positions`
 	var st stats
 	if err := db.QueryRow(ctx, q).Scan(&st.Closed, &st.Open, &st.Wins,
-		&st.TotalPct, &st.AvgPct, &st.BestPct, &st.WorstPct); err != nil {
+		&st.TotalPct, &st.AvgPct, &st.BestPct, &st.WorstPct, &st.RealizedPnl); err != nil {
 		return nil, err
 	}
 	if st.Closed > 0 {
