@@ -1,7 +1,12 @@
 const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
-try { tg.setHeaderColor("secondary_bg_color"); } catch (e) { /* старые клиенты */ }
+// Обсидиановый фон под нативные элементы Telegram. На старых клиентах hex не
+// поддерживается — падаем в try/catch на безопасный ключ темы.
+try { tg.setBackgroundColor("#07080b"); } catch (e) { /* старый клиент */ }
+try { tg.setHeaderColor("#07080b"); } catch (e) {
+  try { tg.setHeaderColor("secondary_bg_color"); } catch (e2) { /* старый клиент */ }
+}
 
 // В полноэкранном режиме контент уходит под статус-бар и кнопки Telegram.
 // Складываем safeAreaInset (чёлка/часы) + contentSafeAreaInset (кнопки
@@ -90,6 +95,7 @@ let lastOv = null;
 let lastStatsData = null;
 let lastEquityPts = null;
 let lastZenRender = 0;
+let lastEquityVal = null; // для подсветки изменения equity в hero
 
 function renderOverview(ov) {
   lastOv = ov;
@@ -116,6 +122,21 @@ function renderBalance(b) {
       <div><div class="lbl">Нереализ. PnL</div><div class="val">${pnlSpan(b.unrealisedPnl)}</div></div>
       <div><div class="lbl">В позициях</div><div class="val">$${fmt(b.walletBalance - b.available)}</div></div>
     </div>`;
+  flashEquity(b.equity);
+}
+
+// flashEquity — короткая зелёная/красная вспышка большой цифры equity, когда
+// она изменилась между обновлениями (живой WS-тик). В дзене не мигаем.
+function flashEquity(val) {
+  if (zen) { lastEquityVal = val; return; }
+  const el = $("balance-card").querySelector(".hero-equity");
+  if (el && lastEquityVal != null && val !== lastEquityVal) {
+    const cls = val > lastEquityVal ? "flash-up" : "flash-down";
+    el.classList.remove("flash-up", "flash-down");
+    void el.offsetWidth; // рестарт анимации
+    el.classList.add(cls);
+  }
+  lastEquityVal = val;
 }
 
 // realizedBadge — крупный «герой»-бейдж с реализованным PnL из последней
@@ -322,10 +343,22 @@ function renderEquity(pts) {
     <line x1="0" y1="${y(0)}" x2="${W}" y2="${y(0)}"
       stroke="var(--hint)" stroke-width="0.6" stroke-dasharray="4 4" opacity="0.6"/>
     <polygon points="${area}" fill="url(#eq-fill)"/>
-    <polyline points="${line}" fill="none" stroke="${color}" stroke-width="2"
+    <polyline class="eq-line" points="${line}" fill="none" stroke="${color}" stroke-width="2"
       stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="${x(vals.length - 1)}" cy="${y(last)}" r="3.5" fill="${color}"
+    <circle class="eq-dot" cx="${x(vals.length - 1)}" cy="${y(last)}" r="3.5" fill="${color}"
       stroke="var(--bg)" stroke-width="1.5"/>`;
+
+  // Прорисовка линии «осциллографом» при каждом рендере графика.
+  const path = svg.querySelector(".eq-line");
+  if (path && path.getTotalLength) {
+    const len = path.getTotalLength();
+    path.style.transition = "none";
+    path.style.strokeDasharray = len;
+    path.style.strokeDashoffset = len;
+    void path.getBoundingClientRect(); // форсируем reflow до анимации
+    path.style.transition = "stroke-dashoffset 1.1s var(--ease, ease)";
+    path.style.strokeDashoffset = "0";
+  }
 
   $("equity-last").innerHTML = pnlSpan(last, "%", 1);
   $("equity-axis").innerHTML = `
