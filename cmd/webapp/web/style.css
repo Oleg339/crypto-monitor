@@ -46,8 +46,8 @@ body {
   font-family: var(--ff-ui);
   background: var(--bg);
   color: var(--ink);
-  font-size: 15px;
-  line-height: 1.45;
+  font-size: 14px;
+  line-height: 1.4;
   padding-bottom: max(28px, env(safe-area-inset-bottom));
   -webkit-tap-highlight-color: transparent;
   -webkit-font-smoothing: antialiased;
@@ -59,7 +59,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: calc(15px + var(--safe-top)) 16px 10px;
+  padding: calc(11px + var(--safe-top)) 14px 7px;
 }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .brand-mark {
@@ -119,7 +119,7 @@ body {
   top: var(--safe-top);
   z-index: 20;
   display: flex;
-  margin: 6px 16px 14px;
+  margin: 4px 14px 10px;
   padding: 3px;
   background: var(--panel);
   border-radius: 10px;
@@ -128,7 +128,7 @@ body {
 .tab {
   flex: 1;
   position: relative; z-index: 1;
-  padding: 8px 0;
+  padding: 7px 0;
   background: none; border: none;
   border-radius: 8px;
   color: var(--ink-3);
@@ -150,7 +150,7 @@ body {
   transition: transform 0.28s var(--ease);
 }
 
-main { padding: 0 16px; }
+main { padding: 0 14px; }
 
 .page { display: none; }
 .page.active { display: block; }
@@ -170,15 +170,15 @@ main { padding: 0 16px; }
   background: var(--panel);
   border: 1px solid var(--hair);
   border-radius: var(--radius);
-  padding: 14px 15px;
-  margin-bottom: 11px;
+  padding: 12px 13px;
+  margin-bottom: 9px;
 }
 
 h2, .section-h {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--ink-3);
   font-weight: 600;
-  margin: 16px 2px 8px;
+  margin: 12px 2px 6px;
   text-transform: uppercase;
   letter-spacing: 1px;
 }
@@ -192,21 +192,21 @@ h2, .section-h {
 /* ───────────────────── Hero-карточка баланса ───────────────────── */
 .hero {
   border-radius: var(--radius);
-  padding: 18px 16px 15px;
-  margin-bottom: 11px;
+  padding: 14px 14px 12px;
+  margin-bottom: 9px;
   background: var(--panel);
   border: 1px solid var(--hair);
 }
 .hero-label {
-  font-size: 11px; color: var(--ink-3);
+  font-size: 10.5px; color: var(--ink-3);
   text-transform: uppercase; letter-spacing: 1px;
 }
 .hero-equity {
   font-family: var(--ff-mono);
-  font-size: 34px; font-weight: 600;
+  font-size: 29px; font-weight: 600;
   letter-spacing: -1px;
   line-height: 1.1;
-  margin: 4px 0 11px;
+  margin: 3px 0 9px;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
@@ -228,19 +228,19 @@ h2, .section-h {
 .hero-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 11px 16px;
-  margin-top: 15px;
-  padding-top: 13px;
+  gap: 9px 14px;
+  margin-top: 12px;
+  padding-top: 11px;
   border-top: 1px solid var(--hair);
 }
 .hero-grid .lbl {
-  font-size: 11px; color: var(--ink-3);
+  font-size: 10.5px; color: var(--ink-3);
   letter-spacing: 0.2px;
 }
 .hero-grid .val {
   font-family: var(--ff-mono);
-  font-size: 15px; font-weight: 500;
-  margin-top: 2px;
+  font-size: 14px; font-weight: 500;
+  margin-top: 1px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -252,11 +252,11 @@ h2, .section-h {
   border: 1px solid var(--hair);
   border-radius: var(--radius);
   overflow: hidden;
-  margin-bottom: 11px;
+  margin-bottom: 9px;
 }
 .stat {
   text-align: center;
-  padding: 12px 6px 11px;
+  padding: 10px 5px 9px;
   border-left: 1px solid var(--hair);
 }
 .stat:first-child { border-left: none; }
@@ -274,18 +274,18 @@ h2, .section-h {
 }
 
 /* ───────────────────── График equity ───────────────────── */
-.chart-card { padding-bottom: 11px; }
+.chart-card { padding-bottom: 10px; }
 .chart-last {
   font-family: var(--ff-mono);
-  font-size: 14px; font-weight: 600;
+  font-size: 13.5px; font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 #equity-wrap { position: relative; }
-#equity-chart { width: 100%; height: 148px; display: block; }
+#equity-chart { width: 100%; height: 116px; display: block; }
 #equity-axis {
   display: flex; justify-content: space-between;
   font-family: var(--ff-mono);
-  font-size: 10px; color: var(--ink-3); margin-top: 6px;
+  font-size: 9.5px; color: var(--ink-3); margin-top: 5px;
 }
 
 /* ════════════════════════════ Позиции ══════════════════════════════════ */
@@ -294,8 +294,8 @@ h2, .section-h {
   border: 1px solid var(--hair);
   border-left: 2px solid var(--ink-3);
   border-radius: var(--radius);
-  padding: 12px 14px;
-  margin-bottom: 8px;
+  padding: 10px 13px;
+  margin-bottom: 7px;
 }
 .pos.long  { border-left-color: var(--pos); }
 .pos.short { border-left-color: var(--neg); }
@@ -321,14 +321,14 @@ h2, .section-h {
 
 .pos-detail {
   display: flex; justify-content: space-between;
-  margin-top: 9px; font-size: 12px; color: var(--ink-3);
+  margin-top: 7px; font-size: 11.5px; color: var(--ink-3);
   font-family: var(--ff-mono);
   font-variant-numeric: tabular-nums;
 }
 .pos-detail b { color: var(--ink); font-weight: 500; }
 
 /* шкала SL ←→ TP */
-.range { margin-top: 11px; }
+.range { margin-top: 9px; }
 .range-bar {
   position: relative; height: 3px; border-radius: 2px;
   background: linear-gradient(90deg, var(--neg), var(--ink-3) 50%, var(--pos));
@@ -358,9 +358,9 @@ h2, .section-h {
   background: var(--panel);
   border: 1px solid var(--hair);
   border-radius: var(--radius);
-  padding: 11px 14px;
-  margin-bottom: 7px;
-  font-size: 14px;
+  padding: 9px 13px;
+  margin-bottom: 6px;
+  font-size: 13.5px;
   transition: background 0.15s;
 }
 .row:active { background: var(--panel-2); }
@@ -416,10 +416,10 @@ h2, .section-h {
 /* ════════════════ Сравнение с бэктестом ════════════════════════════════ */
 .expectation {
   border-radius: var(--radius);
-  padding: 11px 14px;
-  margin-bottom: 11px;
-  font-size: 12.5px;
-  line-height: 1.5;
+  padding: 9px 13px;
+  margin-bottom: 9px;
+  font-size: 12px;
+  line-height: 1.45;
   color: var(--ink-2);
   border: 1px solid var(--hair);
   background: var(--panel);
