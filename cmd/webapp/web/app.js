@@ -518,37 +518,36 @@ $("zen-btn").addEventListener("click", () => {
   applyZen();
 });
 
-// ── Авторежим (тумблер = команда /auto в боте) ───────────────────────────────
+// ── Авторежим (кнопка в шапке = команда /auto в боте) ────────────────────────
 
-let autoMode = null; // null — ещё не загружен, ряд скрыт
+let autoMode = null; // null — ещё не загружен, кнопка скрыта
 
-function renderAutoRow() {
+function renderAutoBtn() {
   if (autoMode == null) return;
-  $("auto-row").style.display = "";
-  const t = $("auto-toggle");
-  t.classList.toggle("on", autoMode);
-  t.setAttribute("aria-checked", String(autoMode));
+  const b = $("auto-btn");
+  b.style.display = "";
+  b.classList.toggle("active", autoMode);
 }
 
 async function loadSettings() {
   try {
     autoMode = !!(await api("/api/settings")).auto;
-    renderAutoRow();
-  } catch (e) { /* нет доступа к настройкам — ряд остаётся скрытым */ }
+    renderAutoBtn();
+  } catch (e) { /* нет доступа к настройкам — кнопка остаётся скрытой */ }
 }
 
-$("auto-toggle").addEventListener("click", async () => {
+$("auto-btn").addEventListener("click", async () => {
   if (autoMode == null) return;
   haptic("medium");
   const want = !autoMode;
   autoMode = want; // оптимистично, откатим при ошибке
-  renderAutoRow();
+  renderAutoBtn();
   try {
     autoMode = !!(await api("/api/settings", { auto: want })).auto;
   } catch (e) {
     autoMode = !want;
   }
-  renderAutoRow();
+  renderAutoBtn();
 });
 
 const themeMenu = $("theme-menu");

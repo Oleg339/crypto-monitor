@@ -108,7 +108,8 @@ body {
 .icon-btn:active { background: var(--panel-2); }
 #refresh.spin svg { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-#zen-btn.active {
+#zen-btn.active,
+#auto-btn.active {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
@@ -492,45 +493,6 @@ h2, .section-h {
   color: var(--ink);
 }
 
-/* ════════════════ Настройки (авторежим) ════════════════════════════════ */
-.setting-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-.setting-title { font-weight: 600; font-size: 13.5px; }
-.setting-sub { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
-
-.switch {
-  position: relative;
-  flex-shrink: 0;
-  width: 42px; height: 25px;
-  border-radius: 13px;
-  border: 1px solid var(--hair-2);
-  background: var(--panel-2);
-  cursor: pointer;
-  transition: background 0.2s var(--ease), border-color 0.2s;
-}
-.switch .knob {
-  position: absolute;
-  top: 50%; left: 3px;
-  width: 18px; height: 18px;
-  border-radius: 50%;
-  background: var(--ink-2);
-  transform: translateY(-50%);
-  transition: transform 0.22s var(--ease), background 0.2s;
-}
-.switch.on {
-  background: color-mix(in srgb, var(--accent) 32%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-}
-.switch.on .knob {
-  transform: translate(17px, -50%);
-  background: var(--accent);
-}
-.switch:disabled { opacity: 0.5; }
-
 /* ════════════════ Сравнение с бэктестом ════════════════════════════════ */
 .expectation {
   border-radius: var(--radius);
@@ -622,9 +584,8 @@ body.neo .expectation {
   border-color: transparent;
   box-shadow: var(--shadow-out);
 }
+/* без цветной полосы/подсветки: направление показывает бейдж LONG/SHORT */
 body.neo .pos { border-color: transparent; box-shadow: var(--shadow-out); }
-body.neo .pos.long  { border-left-color: var(--pos); }
-body.neo .pos.short { border-left-color: var(--neg); }
 
 body.neo .card, body.neo .hero, body.neo .stat-grid, body.neo .expectation { margin-bottom: 13px; }
 body.neo .pos { margin-bottom: 11px; }
@@ -640,7 +601,8 @@ body.neo .icon-btn {
 body.neo .icon-btn:active { background: var(--bg); box-shadow: var(--shadow-in); }
 /* активное (включённое) состояние — заподлицо с поверхностью: кнопка
    «дожата» до уровня фона, как текст рядом; выделяет только цвет */
-body.neo #zen-btn.active  { color: var(--accent); box-shadow: none; border-color: transparent; }
+body.neo #zen-btn.active,
+body.neo #auto-btn.active { color: var(--accent); box-shadow: none; border-color: transparent; }
 
 /* вкладки: активная ячейка — сама поверхность страницы (прозрачная,
    без теней наружу). Вдавлены только неактивные части шкалы: сегменты
@@ -708,16 +670,6 @@ body.neo #theme-menu {
   border-color: transparent;
   box-shadow: var(--shadow-out);
 }
-
-/* тумблер: вдавленный жёлоб, выпуклая шайба */
-body.neo .switch {
-  background: var(--bg);
-  border-color: transparent;
-  box-shadow: var(--shadow-in);
-}
-body.neo .switch .knob { background: var(--ink-3); box-shadow: var(--shadow-out-sm); }
-body.neo .switch.on { background: var(--bg); }
-body.neo .switch.on .knob { background: var(--accent); }
 body.neo .theme-opt.active { background: var(--panel-2); }
 
 body.neo .error { background: var(--bg); box-shadow: var(--shadow-out); border-color: transparent; }
