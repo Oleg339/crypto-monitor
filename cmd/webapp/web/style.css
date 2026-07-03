@@ -605,7 +605,10 @@ body.neo #zen-btn.active,
 body.neo #auto-btn.active { color: var(--accent); box-shadow: none; border-color: transparent; }
 
 /* вкладки: активная категория «нажата вниз» — скользящая вдавленная
-   лунка; всё остальное — ровная поверхность фона без теней */
+   лунка; всё остальное — ровная поверхность фона без теней.
+   Отступ сверху больше обычного: иначе тени кнопок шапки дотягиваются
+   до лунки последней ячейки и сливаются с её внутренней тенью. */
+body.neo #tabs-wrap { margin-top: 14px; }
 body.neo #tabs {
   background: transparent;
   border: none;

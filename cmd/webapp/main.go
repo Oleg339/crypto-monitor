@@ -110,7 +110,13 @@ func main() {
 
 	staticFS, _ := fs.Sub(webFS, "web")
 	mux := http.NewServeMux()
-	mux.Handle("/", http.FileServer(http.FS(staticFS)))
+	fileServer := http.FileServer(http.FS(staticFS))
+	// Статика без кэша: embed.FS не даёт Last-Modified/ETag, и Telegram
+	// WebView залипает на старых CSS/JS после деплоя.
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		fileServer.ServeHTTP(w, r)
+	}))
 	mux.HandleFunc("/ws", hub.handleWS)
 	mux.HandleFunc("/api/overview", s.authMiddleware(s.handleOverview))
 	mux.HandleFunc("/api/trades", s.authMiddleware(s.handleTrades))
