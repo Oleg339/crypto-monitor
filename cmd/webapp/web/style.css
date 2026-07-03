@@ -172,7 +172,6 @@ body {
   background: var(--panel);
   border-radius: 10px;
   border: 1px solid var(--hair);
-  overflow: hidden; /* обрезает сегменты жёлоба в нео по краям бара */
 }
 .tab {
   flex: 1;
