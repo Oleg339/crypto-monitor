@@ -113,8 +113,12 @@
     </section>
 
     <section id="orders" class="page">
-      <!-- эксперимент: без заголовка-строки — проверяем артефакт тени на мобилке -->
-      <div id="orders-list"><div class="skel skel-card"></div><div class="skel skel-card"></div></div>
+      <!-- заголовок внутри обёртки: голый h2 первым элементом страницы
+           вызывал артефакт тени у шкалы на мобильном WebKit -->
+      <div class="orders-block">
+        <h2 class="section-h">Ожидающие лимитные ордеры <span id="orders-count" class="count"></span></h2>
+        <div id="orders-list"><div class="skel skel-card"></div><div class="skel skel-card"></div></div>
+      </div>
     </section>
   </main>
 

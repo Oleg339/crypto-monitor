@@ -514,6 +514,7 @@ document.querySelectorAll("#trade-filters .chip").forEach((c) =>
 async function loadOrders() {
   try {
     const { orders, ttlDays } = await api("/api/orders");
+    $("orders-count").textContent = orders.length || "";
     if (!orders.length) {
       $("orders-list").innerHTML = `<div class="muted">Нет ожидающих ордеров</div>`;
       return;
