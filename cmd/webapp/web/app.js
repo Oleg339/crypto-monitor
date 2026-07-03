@@ -492,7 +492,7 @@ function moveChipGlider() {
   const g = $("chip-glider");
   if (!active || !g) return;
   g.style.width = active.offsetWidth + "px";
-  g.style.transform = `translateX(${active.offsetLeft}px)`;
+  g.style.transform = `translate3d(${active.offsetLeft}px, 0, 0)`;
 }
 window.addEventListener("resize", moveChipGlider);
 window.addEventListener("load", moveChipGlider); // после загрузки шрифтов
@@ -562,7 +562,9 @@ function show(tab) {
   haptic();
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   document.querySelectorAll(".page").forEach((p) => p.classList.toggle("active", p.id === tab));
-  $("tab-glider").style.transform = `translateX(${TABS.indexOf(tab) * 100}%)`;
+  // translate3d вместо translateX: держим ползунок на GPU-слое, чтобы
+  // WebKit не оставлял артефакты внутренних теней после анимации
+  $("tab-glider").style.transform = `translate3d(${TABS.indexOf(tab) * 100}%, 0, 0)`;
   if (tab === "trades" && !loaded.trades) { loaded.trades = true; loadTrades(); }
   if (tab === "orders" && !loaded.orders) { loaded.orders = true; loadOrders(); }
   if (tab === "trades") moveChipGlider();

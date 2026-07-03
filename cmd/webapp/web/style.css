@@ -196,6 +196,9 @@ body {
   background: var(--panel-2);
   border: 1px solid var(--hair);
   transition: transform 0.28s var(--ease);
+  /* постоянный слой GPU: без него WebKit при анимации transform иногда
+     оставляет «призрак» внутренних теней на крайних позициях */
+  will-change: transform;
 }
 
 /* Сентинел — точка чуть выше панели: ушла за верх экрана ⇒ вкладки
@@ -646,6 +649,7 @@ body.neo #chip-glider {
   background: var(--bg);
   box-shadow: inset 2px 2px 5px var(--sh-dark), inset -2px -2px 5px var(--sh-light);
   transition: transform 0.25s var(--ease), width 0.25s var(--ease);
+  will-change: transform, width;
   pointer-events: none;
 }
 body.neo .row:active { background: var(--bg); box-shadow: var(--shadow-in); }
