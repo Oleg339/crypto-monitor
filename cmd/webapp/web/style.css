@@ -473,8 +473,9 @@ h2, .section-h {
 .badge.accent { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 
 /* ════════════════════════════ Фильтры ══════════════════════════════════ */
-.filters { display: flex; gap: 6px; margin-bottom: 10px; overflow-x: auto; scrollbar-width: none; }
+.filters { position: relative; display: flex; gap: 6px; margin-bottom: 10px; overflow-x: auto; scrollbar-width: none; }
 .filters::-webkit-scrollbar { display: none; }
+#chip-glider { display: none; } /* скользящая лунка — только в неоморфизме */
 .chip {
   border: 1px solid var(--hair);
   background: var(--panel);
@@ -604,10 +605,8 @@ body.neo .icon-btn:active { background: var(--bg); box-shadow: var(--shadow-in);
 body.neo #zen-btn.active,
 body.neo #auto-btn.active { color: var(--accent); box-shadow: none; border-color: transparent; }
 
-/* вкладки: активная ячейка — сама поверхность страницы (прозрачная,
-   без теней наружу). Вдавлены только неактивные части шкалы: сегменты
-   жёлоба (::before/::after ползунка) едут вместе с ним и обрезаются
-   краями бара, так что тени живут только на границе активная/неактивные. */
+/* вкладки: активная категория «нажата вниз» — скользящая вдавленная
+   лунка; всё остальное — ровная поверхность фона без теней */
 body.neo #tabs {
   background: transparent;
   border: none;
@@ -617,36 +616,35 @@ body.neo #tabs {
 body.neo #tab-glider {
   top: 0; bottom: 0; left: 0;
   width: calc(100% / 3);
-  background: transparent;
-  border: none;
-  box-shadow: none;
-}
-body.neo #tab-glider::before,
-body.neo #tab-glider::after {
-  content: "";
-  position: absolute;
-  top: 0; bottom: 0;
-  width: 300%;
   background: var(--bg);
+  border: none;
   border-radius: 10px;
   box-shadow: inset 2px 2px 5px var(--sh-dark), inset -2px -2px 5px var(--sh-light);
 }
-body.neo #tab-glider::before { right: 100%; }
-body.neo #tab-glider::after  { left: 100%; }
 body.neo .tab.active { color: var(--accent); }
 
-/* фильтры: тот же принцип, что у вкладок — невыбранные вдавлены,
-   выбранный «поднят» до уровня поверхности и сливается с фоном */
+/* фильтры: тот же принцип, что у вкладок — выбранный «нажат вниз»,
+   остальные на уровне фона; лунка перетекает между чипами (app.js
+   двигает #chip-glider по offsetLeft/offsetWidth активного чипа) */
 body.neo .chip {
-  background: var(--bg);
-  border-color: transparent;
-  box-shadow: inset 2px 2px 5px var(--sh-dark), inset -2px -2px 5px var(--sh-light);
-  transition: box-shadow 0.2s var(--ease), color 0.2s, background 0.2s;
-}
-body.neo .chip.active {
+  position: relative;
+  z-index: 1;
   background: transparent;
-  color: var(--accent);
+  border-color: transparent;
   box-shadow: none;
+  transition: color 0.2s;
+}
+body.neo .chip.active { background: transparent; color: var(--accent); }
+body.neo #chip-glider {
+  display: block;
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 0;
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: inset 2px 2px 5px var(--sh-dark), inset -2px -2px 5px var(--sh-light);
+  transition: transform 0.25s var(--ease), width 0.25s var(--ease);
+  pointer-events: none;
 }
 body.neo .row:active { background: var(--bg); box-shadow: var(--shadow-in); }
 

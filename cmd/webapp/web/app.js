@@ -26,6 +26,7 @@ function applyTheme() {
   document.querySelectorAll(".theme-opt").forEach((b) =>
     b.classList.toggle("active", b.dataset.theme === theme));
   applyTgColors();
+  moveChipGlider(); // ширины чипов зависят от шрифта темы
 }
 
 // В полноэкранном режиме контент уходит под статус-бар и кнопки Telegram.
@@ -484,12 +485,25 @@ async function loadTrades() {
   }
 }
 
+// лунка выбранного фильтра перетекает к активному чипу (только нео-тема,
+// в обсидиане #chip-glider скрыт стилями)
+function moveChipGlider() {
+  const active = document.querySelector("#trade-filters .chip.active");
+  const g = $("chip-glider");
+  if (!active || !g) return;
+  g.style.width = active.offsetWidth + "px";
+  g.style.transform = `translateX(${active.offsetLeft}px)`;
+}
+window.addEventListener("resize", moveChipGlider);
+window.addEventListener("load", moveChipGlider); // после загрузки шрифтов
+
 document.querySelectorAll("#trade-filters .chip").forEach((c) =>
   c.addEventListener("click", () => {
     haptic();
     tradeFilter = c.dataset.f;
     document.querySelectorAll("#trade-filters .chip").forEach((b) =>
       b.classList.toggle("active", b === c));
+    moveChipGlider();
     renderTrades();
   }));
 
@@ -551,10 +565,30 @@ function show(tab) {
   $("tab-glider").style.transform = `translateX(${TABS.indexOf(tab) * 100}%)`;
   if (tab === "trades" && !loaded.trades) { loaded.trades = true; loadTrades(); }
   if (tab === "orders" && !loaded.orders) { loaded.orders = true; loadOrders(); }
+  if (tab === "trades") moveChipGlider();
 }
 
 document.querySelectorAll(".tab").forEach((b) =>
   b.addEventListener("click", () => show(b.dataset.tab)));
+
+// Свайп влево/вправо по контенту переключает вкладки. Игнорируем жесты,
+// начатые на горизонтально скроллящихся фильтрах, и явно вертикальные.
+let swipeX = null, swipeY = null;
+document.querySelector("main").addEventListener("touchstart", (e) => {
+  if (e.target.closest(".filters")) { swipeX = null; return; }
+  swipeX = e.touches[0].clientX;
+  swipeY = e.touches[0].clientY;
+}, { passive: true });
+document.querySelector("main").addEventListener("touchend", (e) => {
+  if (swipeX == null) return;
+  const dx = e.changedTouches[0].clientX - swipeX;
+  const dy = e.changedTouches[0].clientY - swipeY;
+  swipeX = swipeY = null;
+  if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 2) return;
+  const cur = TABS.indexOf(document.querySelector(".tab.active").dataset.tab);
+  const next = cur + (dx < 0 ? 1 : -1);
+  if (next >= 0 && next < TABS.length) show(TABS[next]);
+}, { passive: true });
 
 // Класс .stuck на обёртке вкладок, пока она прилипла к верху: включает
 // сплошную подложку, чтобы контент не просвечивал вокруг при скролле.
