@@ -337,6 +337,50 @@ function connectLive() {
 
 // ── График equity ────────────────────────────────────────────────────────────
 
+// Функция расчета контрольных точек для сглаживания линии Безье
+function getCurvePaths(vals, x, y, y0Val) {
+  const points = vals.map((v, i) => ({ x: x(i), y: y(v) }));
+  if (points.length === 0) return { line: "", area: "" };
+  if (points.length === 1) {
+    return {
+      line: `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`,
+      area: `M ${points[0].x.toFixed(1)} ${y0Val.toFixed(1)} L ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)} Z`
+    };
+  }
+
+  const controlPoint = (current, previous, next, reverse) => {
+    const p = previous || current;
+    const n = next || current;
+    
+    const lengthX = n.x - p.x;
+    const lengthY = n.y - p.y;
+    const speed = 0.16; // коэффициент сглаживания
+    const angle = Math.atan2(lengthY, lengthX) + (reverse ? Math.PI : 0);
+    const length = Math.sqrt(lengthX * lengthX + lengthY * lengthY) * speed;
+
+    const rx = current.x + Math.cos(angle) * length;
+    const ry = current.y + Math.sin(angle) * length;
+    return [rx, ry];
+  };
+
+  let linePath = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+  for (let i = 1; i < points.length; i++) {
+    const p = points[i];
+    const prev = points[i - 1];
+    
+    const [cp1x, cp1y] = controlPoint(prev, points[i - 2], p, false);
+    const [cp2x, cp2y] = controlPoint(p, prev, points[i + 1], true);
+    
+    linePath += ` C ${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+  }
+
+  const areaPath = `M ${points[0].x.toFixed(1)} ${y0Val.toFixed(1)} L ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)} ` + 
+    linePath.substring(linePath.indexOf("C")) + 
+    ` L ${points[points.length - 1].x.toFixed(1)} ${y0Val.toFixed(1)} Z`;
+
+  return { line: linePath, area: areaPath };
+}
+
 function renderEquity(pts) {
   lastEquityPts = pts;
   const svg = $("equity-chart");
@@ -354,8 +398,8 @@ function renderEquity(pts) {
 
   // В дзене линия нейтрального цвета: тренд виден, окраски «хорошо/плохо» нет.
   const color = zen ? "var(--accent)" : (last >= 0 ? "var(--green)" : "var(--red)");
-  const line = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
-  const area = `${padX},${y(0).toFixed(1)} ${line} ${x(vals.length - 1).toFixed(1)},${y(0).toFixed(1)}`;
+  
+  const { line: linePath, area: areaPath } = getCurvePaths(vals, x, y, y(0));
 
   svg.innerHTML = `
     <defs>
@@ -366,8 +410,8 @@ function renderEquity(pts) {
     </defs>
     <line x1="0" y1="${y(0)}" x2="${W}" y2="${y(0)}"
       stroke="var(--hint)" stroke-width="0.6" stroke-dasharray="4 4" opacity="0.6"/>
-    <polygon points="${area}" fill="url(#eq-fill)"/>
-    <polyline class="eq-line" points="${line}" fill="none" stroke="${color}" stroke-width="2"
+    <path d="${areaPath}" fill="url(#eq-fill)"/>
+    <path class="eq-line" d="${linePath}" fill="none" stroke="${color}" stroke-width="2"
       stroke-linejoin="round" stroke-linecap="round"/>
     <circle class="eq-dot" cx="${x(vals.length - 1)}" cy="${y(last)}" r="3.5" fill="${color}"
       stroke="var(--bg)" stroke-width="1.5"/>`;
