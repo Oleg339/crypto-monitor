@@ -1,6 +1,6 @@
 .env
 .env.*
-session_userbot.json
+session*.json
 session_scraper.session
 *.session
 *.session-journal
@@ -13,4 +13,3 @@ metrics_cache.json
 
 # Go
 vendor/
-session_parser_test.json
