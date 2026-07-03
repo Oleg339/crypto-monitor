@@ -13,3 +13,4 @@ metrics_cache.json
 
 # Go
 vendor/
+session_parser_test.json

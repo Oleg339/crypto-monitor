@@ -277,10 +277,14 @@ func (b *Bot) cmdAuto(msg *tgMessage) {
 	if on {
 		note := "<i>После рестарта бот вернётся к значению AUTO_TRADE из .env</i>"
 		if b.paper != nil {
-			note = "<i>Состояние сохранено в БД — рестарт его не сбросит. Тот же тумблер есть в панели.</i>"
+			note = "<i>Состояние сохранено в БД — рестарт его не сбросит. Та же кнопка есть в панели.</i>"
+		}
+		filter := ""
+		if b.cfg.BTCHighSkipPct > 0 {
+			filter = fmt.Sprintf("\nФильтр: лонги при BTC ближе %.0f%% к 10-дневному максимуму — только вручную.", b.cfg.BTCHighSkipPct)
 		}
 		b.send(msg.Chat.ID, 0,
-			"🤖 <b>Авторежим включён</b> — новые сигналы исполняются сразу, без кнопки подтверждения.\n\n"+
+			"🤖 <b>Авторежим включён</b> — новые сигналы исполняются сразу, без кнопки подтверждения."+filter+"\n\n"+
 				"Выключить: /auto\n"+note, nil)
 	} else {
 		b.send(msg.Chat.ID, 0,
@@ -872,14 +876,21 @@ func (b *Bot) sendSignalMsg(sig *ParsedSignal, dbID int64, allowAuto bool) {
 
 	// Авторежим: исполняем сразу, кнопки не нужны. На паузе — обычный путь
 	// с кнопками, чтобы сигнал можно было подтвердить после /resume.
+	// Лонги возле локальных вершин BTC авторежим пропускает (исторически
+	// токсичная зона — вход в силу перед откатом) и отдаёт решение человеку.
 	if allowAuto && b.IsAuto() && !b.IsPaused() {
-		msgID := b.sendGetID(b.chatID, text+"\n\n🤖 <i>Авторежим — исполняю без подтверждения</i>")
-		if msgID > 0 {
-			log.Printf("[bot] auto-executing signal #%d %s", sig.ID, sig.Symbol)
-			b.confirmSignal(&tgMessage{MessageID: msgID, Chat: tgChat{ID: b.chatID}}, id, ps)
-			return
+		if warn := b.btcHighWarn(); warn != "" {
+			text += warn
+			log.Printf("[bot] auto-skip signal #%d %s: BTC near 10d high", sig.ID, sig.Symbol)
+		} else {
+			msgID := b.sendGetID(b.chatID, text+"\n\n🤖 <i>Авторежим — исполняю без подтверждения</i>")
+			if msgID > 0 {
+				log.Printf("[bot] auto-executing signal #%d %s", sig.ID, sig.Symbol)
+				b.confirmSignal(&tgMessage{MessageID: msgID, Chat: tgChat{ID: b.chatID}}, id, ps)
+				return
+			}
+			// не узнали message_id — падаем на ручное подтверждение
 		}
-		// не узнали message_id — падаем на ручное подтверждение
 	}
 
 	kb := inlineKB([][]kbBtn{{{
@@ -1088,6 +1099,38 @@ func (b *Bot) handleCallback(cb *tgCallback) {
 		b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID,
 			fmt.Sprintf("❌ <b>Отклонено:</b> %s/USDT", base), nil)
 	}
+}
+
+// btcHighWarn проверяет положение BTC относительно его 10-дневного максимума.
+// Возвращает "" когда авторежиму можно входить, иначе — текст предупреждения
+// для сообщения с ручными кнопками. Не смогли проверить — тоже отдаём человеку:
+// фильтр защищает деньги, при сомнении решает не автомат.
+func (b *Bot) btcHighWarn() string {
+	pct := b.cfg.BTCHighSkipPct
+	if pct <= 0 {
+		return ""
+	}
+	closes, err := b.bybit.DailyCloses("BTCUSDT", 11)
+	if err != nil || len(closes) < 3 {
+		log.Printf("[bot] btc-high check failed: %v (closes=%d)", err, len(closes))
+		return "\n\n⚠️ <i>Авторежим: не смог проверить положение BTC — реши вручную</i>"
+	}
+	last := closes[len(closes)-1]
+	mx := closes[0]
+	for _, c := range closes {
+		if c > mx {
+			mx = c
+		}
+	}
+	dist := (last/mx - 1) * 100 // ≤ 0: насколько BTC ниже максимума
+	log.Printf("[bot] btc vs 10d high: %.2f%% (порог %.0f%%)", dist, pct)
+	if dist > -pct {
+		return fmt.Sprintf(
+			"\n\n⚠️ <i>Авторежим пропустил вход: BTC в %.1f%% от 10-дневного максимума "+
+				"(порог %.0f%%) — зона, где лонги исторически убыточны. Решай вручную.</i>",
+			-dist, pct)
+	}
+	return ""
 }
 
 // confirmSignal исполняет pending-сигнал; при успехе убирает его из очереди

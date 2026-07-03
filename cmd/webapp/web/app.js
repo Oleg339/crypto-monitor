@@ -493,35 +493,55 @@ document.querySelectorAll("#trade-filters .chip").forEach((c) =>
     renderTrades();
   }));
 
-// ── Сигналы ──────────────────────────────────────────────────────────────────
+// ── Ожидающие лимитные ордеры ────────────────────────────────────────────────
 
-async function loadSignals() {
+async function loadOrders() {
   try {
-    const signals = await api("/api/signals?limit=100");
-    $("signals-list").innerHTML = signals.length
-      ? signals.map((s) => `
-        <div class="row">
-          <div class="main">
-            <div><b>${s.symbol}</b>${dirBadge(s.direction)}
-              <span class="badge">${s.strategy}</span><span class="badge">${s.timeframe}</span>
-            </div>
-            <div class="sub">вход $${fmtPrice(s.entry)} · SL $${fmtPrice(s.stopLoss)}
-              ${s.takeProfits && s.takeProfits.length ? "· TP " + s.takeProfits.map(fmtPrice).join(" / ") : ""}</div>
+    const { orders, ttlDays } = await api("/api/orders");
+    $("orders-count").textContent = orders.length || "";
+    if (!orders.length) {
+      $("orders-list").innerHTML = `<div class="muted">Нет ожидающих ордеров</div>`;
+      return;
+    }
+    $("orders-list").innerHTML = orders.map((o) => {
+      // дистанция от текущей цены до входа: ↓ = цене нужно опуститься
+      const dist = o.lastPrice > 0 ? ((o.lastPrice - o.price) / o.price) * 100 : null;
+      const distStr = dist == null ? "—"
+        : `${dist >= 0 ? "↓" : "↑"} ${fmt(Math.abs(dist), 1)}%`;
+      const expires = ttlDays > 0
+        ? new Date(new Date(o.createdAt).getTime() + ttlDays * 86400000) : null;
+      const leftMs = expires ? expires - Date.now() : 0;
+      const leftStr = expires
+        ? (leftMs <= 0 ? "истёк, скоро снимется"
+          : "снимется через " + (leftMs > 48 * 3600000
+            ? Math.round(leftMs / 86400000) + " дн"
+            : Math.round(leftMs / 3600000) + " ч"))
+        : "";
+      const notional = o.price * o.qty;
+      return `
+      <div class="row">
+        <div class="main">
+          <div><b>${o.symbol}</b>${dirBadge(o.side)}
+            <span class="badge">$${fmt(notional, 0)}</span>
           </div>
-          <div class="right">
-            <div><span class="badge accent">RR ${fmt(s.rrRatio, 1)}</span> ${s.sent ? "✅" : "⏳"}</div>
-            <div class="sub">${fmtTime(s.time)}</div>
-          </div>
-        </div>`).join("")
-      : `<div class="muted">Сигналов пока нет</div>`;
+          <div class="sub">вход $${fmtPrice(o.price)} · сейчас $${fmtPrice(o.lastPrice)}</div>
+          <div class="sub">SL $${fmtPrice(o.stopLoss)} · TP $${fmtPrice(o.takeProfit)}</div>
+        </div>
+        <div class="right">
+          <div><span class="badge accent">до входа ${distStr}</span></div>
+          <div class="sub">${fmtTime(o.createdAt)}</div>
+          <div class="sub">${leftStr}</div>
+        </div>
+      </div>`;
+    }).join("");
   } catch (e) {
-    $("signals-list").innerHTML = `<div class="error">Ошибка: ${e.message}</div>`;
+    $("orders-list").innerHTML = `<div class="error">Ошибка: ${e.message}</div>`;
   }
 }
 
 // ── Вкладки, дзен, обновление ────────────────────────────────────────────────
 
-const TABS = ["overview", "trades", "signals"];
+const TABS = ["overview", "trades", "orders"];
 const loaded = {};
 
 function show(tab) {
@@ -530,7 +550,7 @@ function show(tab) {
   document.querySelectorAll(".page").forEach((p) => p.classList.toggle("active", p.id === tab));
   $("tab-glider").style.transform = `translateX(${TABS.indexOf(tab) * 100}%)`;
   if (tab === "trades" && !loaded.trades) { loaded.trades = true; loadTrades(); }
-  if (tab === "signals" && !loaded.signals) { loaded.signals = true; loadSignals(); }
+  if (tab === "orders" && !loaded.orders) { loaded.orders = true; loadOrders(); }
 }
 
 document.querySelectorAll(".tab").forEach((b) =>
@@ -618,7 +638,7 @@ $("refresh").addEventListener("click", async () => {
   btn.classList.add("spin");
   const jobs = [loadOverview(), loadEquity(), loadStats()];
   if (loaded.trades) jobs.push(loadTrades());
-  if (loaded.signals) jobs.push(loadSignals());
+  if (loaded.orders) jobs.push(loadOrders());
   await Promise.allSettled(jobs);
   btn.classList.remove("spin");
 });

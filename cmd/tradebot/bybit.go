@@ -352,6 +352,33 @@ func (c *BybitClient) PlaceOrder(symbol, side, qty, price, sl, tp string) (*Orde
 	return &OrderResult{OrderID: res.OrderID}, nil
 }
 
+// ── Daily klines ──────────────────────────────────────────────────────────────
+
+// DailyCloses возвращает последние n дневных закрытий (от старых к новым;
+// последний элемент — текущий, ещё не закрытый день).
+func (c *BybitClient) DailyCloses(symbol string, n int) ([]float64, error) {
+	raw, err := c.get("/v5/market/kline",
+		fmt.Sprintf("category=linear&symbol=%s&interval=D&limit=%d", symbol, n))
+	if err != nil {
+		return nil, err
+	}
+	var res struct {
+		List [][]string `json:"list"` // [startTime, open, high, low, close, ...], новые первыми
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	out := make([]float64, 0, len(res.List))
+	for i := len(res.List) - 1; i >= 0; i-- {
+		row := res.List[i]
+		if len(row) < 5 {
+			continue
+		}
+		out = append(out, pf(row[4]))
+	}
+	return out, nil
+}
+
 // ── Open orders ───────────────────────────────────────────────────────────────
 
 type OpenOrder struct {

@@ -30,6 +30,8 @@ type server struct {
 	// Backtest expectations, for "is the live winrate still plausible" checks.
 	expWinRate float64
 	expAvgPnl  float64
+	// TTL ордеров у tradebot — чтобы показать, когда лимитник будет снят.
+	orderTTLDays float64
 
 	mu        sync.Mutex
 	cached    overview
@@ -91,14 +93,16 @@ func main() {
 	// Same defaults as the tradebot's safety rules.
 	expWin, _ := strconv.ParseFloat(getenv("BACKTEST_WIN_RATE", "60.7"), 64)
 	expAvg, _ := strconv.ParseFloat(getenv("BACKTEST_AVG_PNL", "4.80"), 64)
+	ttlDays, _ := strconv.ParseFloat(getenv("ORDER_TTL_DAYS", "8"), 64)
 
 	s := &server{
-		bybit:      newBybitClient(base, getenv("BYBIT_API_KEY", ""), getenv("BYBIT_API_SECRET", "")),
-		db:         db,
-		botToken:   botToken,
-		allowedID:  chatID,
-		expWinRate: expWin,
-		expAvgPnl:  expAvg,
+		bybit:        newBybitClient(base, getenv("BYBIT_API_KEY", ""), getenv("BYBIT_API_SECRET", "")),
+		db:           db,
+		botToken:     botToken,
+		allowedID:    chatID,
+		expWinRate:   expWin,
+		expAvgPnl:    expAvg,
+		orderTTLDays: ttlDays,
 	}
 
 	hub := newLiveHub(s)
@@ -114,6 +118,7 @@ func main() {
 	mux.HandleFunc("/api/equity", s.authMiddleware(s.handleEquity))
 	mux.HandleFunc("/api/stats", s.authMiddleware(s.handleStats))
 	mux.HandleFunc("/api/settings", s.authMiddleware(s.handleSettings))
+	mux.HandleFunc("/api/orders", s.authMiddleware(s.handleOrders))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -218,6 +223,16 @@ func (s *server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]bool{"auto": auto})
+}
+
+// handleOrders — ожидающие лимитные ордеры на вход (ещё не исполнены).
+func (s *server) handleOrders(w http.ResponseWriter, _ *http.Request) {
+	orders, err := s.bybit.openOrders()
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"orders": orders, "ttlDays": s.orderTTLDays})
 }
 
 func (s *server) handleTrades(w http.ResponseWriter, r *http.Request) {

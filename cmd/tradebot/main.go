@@ -23,6 +23,9 @@ type Config struct {
 	RiskPct   float64
 	Leverage  float64
 	AutoTrade bool // исполнять сигналы без кнопки подтверждения
+	// Авторежим пропускает лонги, когда BTC ближе этого процента к своему
+	// 10-дневному максимуму (исторически токсичная зона). 0 = фильтр выключен.
+	BTCHighSkipPct float64
 	// Paper trading
 	PaperTrading       bool
 	DatabaseURL        string
@@ -57,6 +60,7 @@ func loadConfig() *Config {
 		RiskPct:        getenvF("RISK_PCT", 10),
 		Leverage:       getenvF("LEVERAGE", 3),
 		AutoTrade:      getenv("AUTO_TRADE", "false") == "true",
+		BTCHighSkipPct: getenvF("BTC_HIGH_SKIP_PCT", 4),
 		PaperTrading:       getenv("PAPER_TRADING", "false") == "true",
 		DatabaseURL:        getenv("DATABASE_URL", ""),
 		PaperInitialEquity: getenvF("PAPER_INITIAL_EQUITY", 1000),
