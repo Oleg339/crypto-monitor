@@ -59,6 +59,36 @@ type Bot struct {
 	paused       bool
 	pauseReason  string
 	hideEquity   bool // when true: show wallet balance only, not equity with unrealised PnL
+	auto         bool // авторежим: исполнять сигналы без кнопки подтверждения
+}
+
+// IsAuto — включён ли авторежим. Источник истины — bot_settings в общей БД
+// (её же переключает тумблер в webapp); без БД — поле в памяти.
+func (b *Bot) IsAuto() bool {
+	if b.paper != nil {
+		if v, err := b.paper.GetSetting(context.Background(), "auto_trade"); err == nil && v != "" {
+			return v == "1"
+		}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.auto
+}
+
+func (b *Bot) setAuto(on bool) {
+	b.mu.Lock()
+	b.auto = on
+	b.mu.Unlock()
+	if b.paper != nil {
+		v := "0"
+		if on {
+			v = "1"
+		}
+		if err := b.paper.SetSetting(context.Background(), "auto_trade", v); err != nil {
+			log.Printf("[settings] set auto_trade: %v", err)
+		}
+	}
+	log.Printf("[bot] auto mode: %v", on)
 }
 
 func (b *Bot) Pause(reason string) {
@@ -113,6 +143,7 @@ func newBot(cfg *Config, bybitClient *BybitClient, paper *PaperStore) *Bot {
 			},
 		},
 		pending: map[string]*pendingSignal{},
+		auto:    cfg.AutoTrade,
 	}
 }
 
@@ -214,6 +245,7 @@ func (b *Bot) handleMessage(msg *tgMessage) {
 				"<code>/signal SYMBOL entry_low entry_high sl tp</code>\n"+
 				"<code>/positions</code> — открытые позиции\n"+
 				"<code>/signals</code> — сигналы за последние 24ч\n"+
+				"<code>/auto</code> — вкл/выкл автоисполнение сигналов\n"+
 				"<code>/cancel</code> — отменить все ордера"+
 				extra+"\n\n"+
 				"Пример:\n<code>/signal AVAXUSDT 9.20 9.30 8.50 11.50</code>", nil)
@@ -231,6 +263,28 @@ func (b *Bot) handleMessage(msg *tgMessage) {
 		b.cmdResume(msg)
 	case "signals":
 		b.cmdSignals(msg)
+	case "auto":
+		b.cmdAuto(msg)
+	}
+}
+
+// ── /auto ─────────────────────────────────────────────────────────────────────
+
+func (b *Bot) cmdAuto(msg *tgMessage) {
+	on := !b.IsAuto()
+	b.setAuto(on)
+
+	if on {
+		note := "<i>После рестарта бот вернётся к значению AUTO_TRADE из .env</i>"
+		if b.paper != nil {
+			note = "<i>Состояние сохранено в БД — рестарт его не сбросит. Тот же тумблер есть в панели.</i>"
+		}
+		b.send(msg.Chat.ID, 0,
+			"🤖 <b>Авторежим включён</b> — новые сигналы исполняются сразу, без кнопки подтверждения.\n\n"+
+				"Выключить: /auto\n"+note, nil)
+	} else {
+		b.send(msg.Chat.ID, 0,
+			"👤 <b>Авторежим выключен</b> — сигналы снова требуют подтверждения кнопкой.", nil)
 	}
 }
 
@@ -693,12 +747,14 @@ func (b *Bot) SendSignalFromUserbot(sig *ParsedSignal) {
 		}
 	}
 
-	b.sendSignalMsg(sig, dbID)
+	b.sendSignalMsg(sig, dbID, true)
 }
 
 // sendSignalMsg builds and sends an interactive signal message with confirm/cancel buttons.
 // If dbID > 0, the pending key is "rs{dbID}" so callbacks can update DB status.
-func (b *Bot) sendSignalMsg(sig *ParsedSignal, dbID int64) {
+// allowAuto разрешает исполнение без подтверждения в авторежиме — true только
+// для свежих сигналов из канала; перевысылки истории (/signals) всегда с кнопками.
+func (b *Bot) sendSignalMsg(sig *ParsedSignal, dbID int64, allowAuto bool) {
 	tp := sig.TPs[2]
 
 	type balResult struct {
@@ -763,8 +819,7 @@ func (b *Bot) sendSignalMsg(sig *ParsedSignal, dbID int64) {
 		id = fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 
-	b.mu.Lock()
-	b.pending[id] = &pendingSignal{
+	ps := &pendingSignal{
 		Symbol:    sig.Symbol,
 		Side:      "Buy",
 		EntryLow:  sig.EntryLow,
@@ -779,6 +834,8 @@ func (b *Bot) sendSignalMsg(sig *ParsedSignal, dbID int64) {
 		Qty:       qty,
 		DBID:      dbID,
 	}
+	b.mu.Lock()
+	b.pending[id] = ps
 	b.mu.Unlock()
 
 	var tpLines string
@@ -812,6 +869,18 @@ func (b *Bot) sendSignalMsg(sig *ParsedSignal, dbID int64) {
 		b.cfg.RiskPct, equity, b.cfg.Leverage,
 		qtyStr, base, margin,
 	)
+
+	// Авторежим: исполняем сразу, кнопки не нужны. На паузе — обычный путь
+	// с кнопками, чтобы сигнал можно было подтвердить после /resume.
+	if allowAuto && b.IsAuto() && !b.IsPaused() {
+		msgID := b.sendGetID(b.chatID, text+"\n\n🤖 <i>Авторежим — исполняю без подтверждения</i>")
+		if msgID > 0 {
+			log.Printf("[bot] auto-executing signal #%d %s", sig.ID, sig.Symbol)
+			b.confirmSignal(&tgMessage{MessageID: msgID, Chat: tgChat{ID: b.chatID}}, id, ps)
+			return
+		}
+		// не узнали message_id — падаем на ручное подтверждение
+	}
 
 	kb := inlineKB([][]kbBtn{{{
 		Text: "✅ Войти", Data: "confirm:" + id,
@@ -915,7 +984,7 @@ func (b *Bot) cmdSignals(msg *tgMessage) {
 					SL:        rs.SL,
 					TPs:       rs.TPs,
 				}
-				b.sendSignalMsg(parsedSig, rs.ID)
+				b.sendSignalMsg(parsedSig, rs.ID, false)
 			}
 		}
 	}
@@ -998,49 +1067,9 @@ func (b *Bot) handleCallback(cb *tgCallback) {
 		return
 	}
 
-	// ── setstop: retry setting SL/TP on an existing position ─────────────────
-	if action == "setstop" {
-		// id = "SYMBOL:SL:TP"
-		parts := strings.SplitN(id, ":", 3)
-		if len(parts) != 3 {
-			return
-		}
-		symbol, sl, tp := parts[0], parts[1], parts[2]
-		base := strings.TrimSuffix(symbol, "USDT")
-		retryKB := inlineKB([][]kbBtn{{{Text: "🔄 Повторить", Data: cb.Data}}})
-
-		if err := b.bybit.SetTradingStop(symbol, sl, tp); err != nil {
-			log.Printf("[bybit] retry set-trading-stop %s: %v", symbol, err)
-			b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID,
-				fmt.Sprintf("⚠️ <b>%s/USDT — SL/TP не выставлены</b>\n\n<code>%s</code>", base, esc(err.Error())),
-				retryKB)
-			return
-		}
-		log.Printf("[bybit] trading stop set %s sl=%s tp=%s (retry)", symbol, sl, tp)
-		b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID,
-			fmt.Sprintf("✅ <b>%s/USDT — SL/TP выставлены</b>\n\nSL: <code>$%s</code>  TP: <code>$%s</code>", base, sl, tp),
-			nil)
-		return
-	}
-
 	switch action {
 	case "confirm":
-		ok := b.executeSignal(cb.Message, sig)
-		if ok {
-			b.mu.Lock()
-			delete(b.pending, id)
-			b.mu.Unlock()
-			// Update DB status for userbot signals (keys starting with "rs")
-			if b.paper != nil && strings.HasPrefix(id, "rs") {
-				var dbID int64
-				fmt.Sscanf(id[2:], "%d", &dbID)
-				if dbID > 0 {
-					if err := b.paper.UpdateSignalStatus(context.Background(), dbID, "confirmed"); err != nil {
-						log.Printf("[signals] update status: %v", err)
-					}
-				}
-			}
-		}
+		b.confirmSignal(cb.Message, id, sig)
 	case "cancel":
 		b.mu.Lock()
 		delete(b.pending, id)
@@ -1059,6 +1088,29 @@ func (b *Bot) handleCallback(cb *tgCallback) {
 		b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID,
 			fmt.Sprintf("❌ <b>Отклонено:</b> %s/USDT", base), nil)
 	}
+}
+
+// confirmSignal исполняет pending-сигнал; при успехе убирает его из очереди
+// и помечает запись в БД подтверждённой. msg — сообщение, которое будет
+// редактироваться по ходу исполнения (с кнопки или из авторежима).
+func (b *Bot) confirmSignal(msg *tgMessage, id string, sig *pendingSignal) bool {
+	ok := b.executeSignal(msg, sig)
+	if ok {
+		b.mu.Lock()
+		delete(b.pending, id)
+		b.mu.Unlock()
+		// Update DB status for userbot signals (keys starting with "rs")
+		if b.paper != nil && strings.HasPrefix(id, "rs") {
+			var dbID int64
+			fmt.Sscanf(id[2:], "%d", &dbID)
+			if dbID > 0 {
+				if err := b.paper.UpdateSignalStatus(context.Background(), dbID, "confirmed"); err != nil {
+					log.Printf("[signals] update status: %v", err)
+				}
+			}
+		}
+	}
+	return ok
 }
 
 func (b *Bot) executeSignal(msg *tgMessage, sig *pendingSignal) bool {
@@ -1113,15 +1165,9 @@ func (b *Bot) executeSignal(msg *tgMessage, sig *pendingSignal) bool {
 	log.Printf("[order] placed %s %s @ %s  sl=%s tp=%s  id=%s",
 		sig.Symbol, sig.QtyStr, priceStr, slStr, tpStr, result.OrderID)
 
-	if err := b.bybit.SetTradingStop(sig.Symbol, slStr, tpStr); err != nil {
-		log.Printf("[bybit] set-trading-stop %s: %v", sig.Symbol, err)
-		stopData := fmt.Sprintf("setstop:%s:%s:%s", sig.Symbol, slStr, tpStr)
-		kb := inlineKB([][]kbBtn{{{Text: "🔄 Выставить SL/TP", Data: stopData}}})
-		b.editMsg(msg.Chat.ID, msg.MessageID,
-			text+"\n\n⚠️ <b>SL/TP не выставлены на позицию</b> — нажми кнопку", kb)
-	} else {
-		b.editMsg(msg.Chat.ID, msg.MessageID, text, nil)
-	}
+	// SL/TP прикреплены к самому ордеру (см. PlaceOrder) и применятся к
+	// позиции в момент исполнения — отдельный вызов не нужен.
+	b.editMsg(msg.Chat.ID, msg.MessageID, text, nil)
 	return true
 }
 
@@ -1192,6 +1238,24 @@ func (b *Bot) send(chatID int64, replyTo int, text string, kb json.RawMessage) {
 	b.tgPost("sendMessage", body)
 }
 
+// sendGetID отправляет сообщение и возвращает его message_id (0 при ошибке) —
+// нужно авторежиму, чтобы редактировать сообщение по ходу исполнения.
+func (b *Bot) sendGetID(chatID int64, text string) int {
+	raw := b.tgPost("sendMessage", map[string]interface{}{
+		"chat_id":    chatID,
+		"text":       text,
+		"parse_mode": "HTML",
+	})
+	var res struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			MessageID int `json:"message_id"`
+		} `json:"result"`
+	}
+	json.Unmarshal(raw, &res)
+	return res.Result.MessageID
+}
+
 func (b *Bot) editMsg(chatID int64, msgID int, text string, kb json.RawMessage) {
 	body := map[string]interface{}{
 		"chat_id":    chatID,
@@ -1212,7 +1276,8 @@ func (b *Bot) answerCB(id, text string) {
 	})
 }
 
-func (b *Bot) tgPost(method string, body interface{}) {
+// tgPost выполняет метод Bot API и возвращает сырой ответ (nil при ошибке).
+func (b *Bot) tgPost(method string, body interface{}) []byte {
 	data, _ := json.Marshal(body)
 
 	// log outgoing (trim long text for readability)
@@ -1225,13 +1290,15 @@ func (b *Bot) tgPost(method string, body interface{}) {
 	resp, err := b.hc.Post(b.apiURL(method), "application/json", bytes.NewReader(data))
 	if err != nil {
 		log.Printf("[tg] %s error: %v", method, err)
-		return
+		return nil
 	}
 	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		raw, _ := io.ReadAll(resp.Body)
 		log.Printf("[tg] %s %d: %s", method, resp.StatusCode, raw)
+		return nil
 	}
+	return raw
 }
 
 // esc escapes HTML special chars for Telegram HTML parse mode.

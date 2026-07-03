@@ -352,19 +352,6 @@ func (c *BybitClient) PlaceOrder(symbol, side, qty, price, sl, tp string) (*Orde
 	return &OrderResult{OrderID: res.OrderID}, nil
 }
 
-// ── Set trading stop (SL/TP on existing position) ────────────────────────────
-
-func (c *BybitClient) SetTradingStop(symbol, sl, tp string) error {
-	_, err := c.post("/v5/position/trading-stop", map[string]string{
-		"category":    "linear",
-		"symbol":      symbol,
-		"positionIdx": "0",
-		"stopLoss":    sl,
-		"takeProfit":  tp,
-	})
-	return err
-}
-
 // ── Open orders ───────────────────────────────────────────────────────────────
 
 type OpenOrder struct {

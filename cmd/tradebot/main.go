@@ -22,6 +22,7 @@ type Config struct {
 	TGChatID  int64
 	RiskPct   float64
 	Leverage  float64
+	AutoTrade bool // исполнять сигналы без кнопки подтверждения
 	// Paper trading
 	PaperTrading       bool
 	DatabaseURL        string
@@ -55,6 +56,7 @@ func loadConfig() *Config {
 		TGChatID:       chatID,
 		RiskPct:        getenvF("RISK_PCT", 10),
 		Leverage:       getenvF("LEVERAGE", 3),
+		AutoTrade:      getenv("AUTO_TRADE", "false") == "true",
 		PaperTrading:       getenv("PAPER_TRADING", "false") == "true",
 		DatabaseURL:        getenv("DATABASE_URL", ""),
 		PaperInitialEquity: getenvF("PAPER_INITIAL_EQUITY", 1000),
@@ -169,8 +171,8 @@ func main() {
 	if cfg.PaperTrading {
 		mode = "paper"
 	}
-	log.Printf("[bot] started  env=%s  mode=%s  risk=%.0f%%  leverage=%.0fx",
-		env, mode, cfg.RiskPct, cfg.Leverage)
+	log.Printf("[bot] started  env=%s  mode=%s  risk=%.0f%%  leverage=%.0fx  auto=%v",
+		env, mode, cfg.RiskPct, cfg.Leverage, cfg.AutoTrade)
 
 	if cfg.AppID != 0 && cfg.AppHash != "" && cfg.Phone != "" {
 		go func() {

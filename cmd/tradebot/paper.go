@@ -27,6 +27,15 @@ CREATE TABLE IF NOT EXISTS received_signals (
     status      TEXT        NOT NULL DEFAULT 'pending'
 );`
 
+// bot_settings — общие настройки бота (например auto_trade), таблица
+// разделяется с webapp: переключатель в панели пишет сюда же.
+const createSettingsTableSQL = `
+CREATE TABLE IF NOT EXISTS bot_settings (
+    key        TEXT        PRIMARY KEY,
+    value      TEXT        NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);`
+
 const createTableSQL = `
 CREATE TABLE IF NOT EXISTS paper_trades (
     id          SERIAL PRIMARY KEY,
@@ -113,7 +122,30 @@ func newPaperStore(ctx context.Context, dsn string) (*PaperStore, error) {
 	if _, err = pool.Exec(ctx, createTableSQL); err != nil {
 		return nil, fmt.Errorf("create trades table: %w", err)
 	}
+	if _, err = pool.Exec(ctx, createSettingsTableSQL); err != nil {
+		return nil, fmt.Errorf("create settings table: %w", err)
+	}
 	return &PaperStore{pool: pool}, nil
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+
+// GetSetting возвращает значение ключа или "" если ключ не задан.
+func (s *PaperStore) GetSetting(ctx context.Context, key string) (string, error) {
+	var v string
+	err := s.pool.QueryRow(ctx, `SELECT value FROM bot_settings WHERE key = $1`, key).Scan(&v)
+	if err == pgx.ErrNoRows {
+		return "", nil
+	}
+	return v, err
+}
+
+func (s *PaperStore) SetSetting(ctx context.Context, key, value string) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO bot_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+		key, value)
+	return err
 }
 
 func (s *PaperStore) SaveSignal(ctx context.Context, sig *ParsedSignal) (int64, error) {
