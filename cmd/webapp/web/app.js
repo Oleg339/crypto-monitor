@@ -26,7 +26,9 @@ function applyTheme() {
   document.querySelectorAll(".theme-opt").forEach((b) =>
     b.classList.toggle("active", b.dataset.theme === theme));
   applyTgColors();
-  moveChipGlider(); // ширины чипов зависят от шрифта темы
+  // ширины элементов зависят от шрифта темы
+  moveChipGlider();
+  moveTabGlider();
 }
 
 // В полноэкранном режиме контент уходит под статус-бар и кнопки Telegram.
@@ -558,13 +560,25 @@ async function loadOrders() {
 const TABS = ["overview", "trades", "orders"];
 const loaded = {};
 
+// Ползунок вкладок позиционируем целыми пикселями по фактической геометрии
+// кнопки: проценты от дробной ширины ячейки заставляют мобильный WebKit
+// растрировать лунку с тенями на субпиксельной позиции — появляются
+// артефакты-«призраки» (заметно на крайней ячейке).
+function moveTabGlider() {
+  const btn = document.querySelector(".tab.active");
+  const g = $("tab-glider");
+  if (!btn || !g) return;
+  g.style.width = btn.offsetWidth + "px";
+  g.style.transform = `translate3d(${btn.offsetLeft}px, 0, 0)`;
+}
+window.addEventListener("resize", moveTabGlider);
+window.addEventListener("load", moveTabGlider); // после загрузки шрифтов
+
 function show(tab) {
   haptic();
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   document.querySelectorAll(".page").forEach((p) => p.classList.toggle("active", p.id === tab));
-  // translate3d вместо translateX: держим ползунок на GPU-слое, чтобы
-  // WebKit не оставлял артефакты внутренних теней после анимации
-  $("tab-glider").style.transform = `translate3d(${TABS.indexOf(tab) * 100}%, 0, 0)`;
+  moveTabGlider();
   if (tab === "trades" && !loaded.trades) { loaded.trades = true; loadTrades(); }
   if (tab === "orders" && !loaded.orders) { loaded.orders = true; loadOrders(); }
   if (tab === "trades") moveChipGlider();
@@ -682,6 +696,7 @@ $("refresh").addEventListener("click", async () => {
 document.body.classList.toggle("zen", zen);
 $("zen-btn").classList.toggle("active", zen);
 applyTheme();
+moveTabGlider();
 loadOverview();
 loadEquity();
 loadStats();
