@@ -158,16 +158,20 @@ body {
 .theme-opt.active .check { visibility: visible; }
 
 /* ════════════════════════════ Вкладки ══════════════════════════════════ */
-#tabs {
+#tabs-wrap {
   position: sticky;
   top: var(--safe-top);
   z-index: 20;
-  display: flex;
   margin: 4px 14px 10px;
+}
+#tabs {
+  position: relative;
+  display: flex;
   padding: 3px;
   background: var(--panel);
   border-radius: 10px;
   border: 1px solid var(--hair);
+  overflow: hidden; /* обрезает сегменты жёлоба в нео по краям бара */
 }
 .tab {
   flex: 1;
@@ -192,6 +196,37 @@ body {
   background: var(--panel-2);
   border: 1px solid var(--hair);
   transition: transform 0.28s var(--ease);
+}
+
+/* Сентинел — точка чуть выше панели: ушла за верх экрана ⇒ вкладки
+   прилипли (app.js вешает класс .stuck через IntersectionObserver). */
+#tabs-sentinel {
+  position: absolute;
+  top: calc(-1 * var(--safe-top) - 6px);
+  width: 1px; height: 1px;
+  pointer-events: none;
+}
+
+/* Подложка прилипшей панели: без неё контент при скролле просвечивает в
+   зазорах вокруг (панель выглядит оторванной). Снизу — растворение. */
+#tabs-wrap.stuck::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: -14px; right: -14px;
+  top: calc(-1 * var(--safe-top) - 4px);
+  bottom: -1px;
+  background: var(--bg);
+}
+#tabs-wrap.stuck::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: -14px; right: -14px;
+  top: 100%;
+  height: 12px;
+  background: linear-gradient(var(--bg), transparent);
+  pointer-events: none;
 }
 
 main { padding: 0 14px; }
@@ -597,36 +632,59 @@ body.neo .row { margin-bottom: 10px; }
 
 /* мелкие выпуклые элементы */
 body.neo .brand-mark,
-body.neo .icon-btn,
-body.neo .chip {
+body.neo .icon-btn {
   background: var(--bg);
   border-color: transparent;
   box-shadow: var(--shadow-out-sm);
 }
 body.neo .icon-btn:active { background: var(--bg); box-shadow: var(--shadow-in); }
-body.neo #zen-btn.active  { color: var(--accent); box-shadow: var(--shadow-in); }
+/* активное (включённое) состояние — заподлицо с поверхностью: кнопка
+   «дожата» до уровня фона, как текст рядом; выделяет только цвет */
+body.neo #zen-btn.active  { color: var(--accent); box-shadow: none; border-color: transparent; }
 
-/* вкладки: вдавленный жёлоб, выпуклый ползунок */
+/* вкладки: активная ячейка — сама поверхность страницы (прозрачная,
+   без теней наружу). Вдавлены только неактивные части шкалы: сегменты
+   жёлоба (::before/::after ползунка) едут вместе с ним и обрезаются
+   краями бара, так что тени живут только на границе активная/неактивные. */
 body.neo #tabs {
-  background: var(--bg);
-  border-color: transparent;
-  box-shadow: var(--shadow-in);
-  padding: 4px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
 }
 body.neo #tab-glider {
-  top: 4px; bottom: 4px; left: 4px;
-  width: calc((100% - 8px) / 3);
-  background: var(--bg);
+  top: 0; bottom: 0; left: 0;
+  width: calc(100% / 3);
+  background: transparent;
   border: none;
-  box-shadow: var(--shadow-out-sm);
+  box-shadow: none;
 }
+body.neo #tab-glider::before,
+body.neo #tab-glider::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 300%;
+  background: var(--bg);
+  border-radius: 10px;
+  box-shadow: inset 2px 2px 5px var(--sh-dark), inset -2px -2px 5px var(--sh-light);
+}
+body.neo #tab-glider::before { right: 100%; }
+body.neo #tab-glider::after  { left: 100%; }
 body.neo .tab.active { color: var(--accent); }
 
-/* фильтры и строки: активное — вдавлено */
-body.neo .chip.active {
+/* фильтры: тот же принцип, что у вкладок — невыбранные вдавлены,
+   выбранный «поднят» до уровня поверхности и сливается с фоном */
+body.neo .chip {
   background: var(--bg);
+  border-color: transparent;
+  box-shadow: inset 2px 2px 5px var(--sh-dark), inset -2px -2px 5px var(--sh-light);
+  transition: box-shadow 0.2s var(--ease), color 0.2s, background 0.2s;
+}
+body.neo .chip.active {
+  background: transparent;
   color: var(--accent);
-  box-shadow: var(--shadow-in);
+  box-shadow: none;
 }
 body.neo .row:active { background: var(--bg); box-shadow: var(--shadow-in); }
 

@@ -58,12 +58,15 @@
     </div>
   </header>
 
-  <nav id="tabs">
-    <button class="tab active" data-tab="overview">Обзор</button>
-    <button class="tab" data-tab="trades">Сделки</button>
-    <button class="tab" data-tab="signals">Сигналы</button>
-    <span id="tab-glider"></span>
-  </nav>
+  <div id="tabs-wrap">
+    <span id="tabs-sentinel" aria-hidden="true"></span>
+    <nav id="tabs">
+      <button class="tab active" data-tab="overview">Обзор</button>
+      <button class="tab" data-tab="trades">Сделки</button>
+      <button class="tab" data-tab="signals">Сигналы</button>
+      <span id="tab-glider"></span>
+    </nav>
+  </div>
 
   <main>
     <section id="overview" class="page active">

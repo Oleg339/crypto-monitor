@@ -492,6 +492,15 @@ function show(tab) {
 document.querySelectorAll(".tab").forEach((b) =>
   b.addEventListener("click", () => show(b.dataset.tab)));
 
+// Класс .stuck на обёртке вкладок, пока она прилипла к верху: включает
+// сплошную подложку, чтобы контент не просвечивал вокруг при скролле.
+try {
+  const wrapEl = $("tabs-wrap");
+  new IntersectionObserver(([e]) =>
+    wrapEl.classList.toggle("stuck", !e.isIntersecting)
+  ).observe($("tabs-sentinel"));
+} catch (e) { /* старый WebView без IntersectionObserver */ }
+
 function applyZen() {
   document.body.classList.toggle("zen", zen);
   $("zen-btn").classList.toggle("active", zen);
