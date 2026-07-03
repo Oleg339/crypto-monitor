@@ -121,12 +121,15 @@ func loadStats(ctx context.Context, db *pgxpool.Pool) (*stats, error) {
 type equityPoint struct {
 	Time   time.Time `json:"time"`
 	CumPct float64   `json:"cumPct"`
+	// сделка за точкой — для интерактивной подписи на графике
+	Symbol string  `json:"symbol"`
+	PnlPct float64 `json:"pnlPct"`
 }
 
 // loadEquity returns the cumulative sum of closed-trade PnL% over time.
 func loadEquity(ctx context.Context, db *pgxpool.Pool) ([]equityPoint, error) {
 	const q = `
-		SELECT closed_at, pnl_pct
+		SELECT closed_at, pnl_pct, symbol
 		FROM positions
 		WHERE status = 'closed' AND closed_at IS NOT NULL AND pnl_pct IS NOT NULL
 		ORDER BY closed_at`
@@ -141,11 +144,12 @@ func loadEquity(ctx context.Context, db *pgxpool.Pool) ([]equityPoint, error) {
 	for rows.Next() {
 		var ts time.Time
 		var pct float64
-		if err := rows.Scan(&ts, &pct); err != nil {
+		var sym string
+		if err := rows.Scan(&ts, &pct, &sym); err != nil {
 			return nil, err
 		}
 		cum += pct
-		out = append(out, equityPoint{Time: ts, CumPct: cum})
+		out = append(out, equityPoint{Time: ts, CumPct: cum, Symbol: sym, PnlPct: pct})
 	}
 	return out, rows.Err()
 }

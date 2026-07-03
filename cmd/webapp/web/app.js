@@ -410,14 +410,26 @@ function renderEquity(pts) {
         <stop offset="0%" stop-color="${color}" stop-opacity="0.35"/>
         <stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>
       </linearGradient>
+      <filter id="eq-glow" x="-20%" y="-60%" width="140%" height="220%">
+        <feGaussianBlur stdDeviation="3"/>
+      </filter>
     </defs>
     <line x1="0" y1="${y(0)}" x2="${W}" y2="${y(0)}"
       stroke="var(--hint)" stroke-width="0.6" stroke-dasharray="4 4" opacity="0.6"/>
     <path d="${areaPath}" fill="url(#eq-fill)"/>
+    <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2.5" opacity="0.4"
+      filter="url(#eq-glow)" stroke-linejoin="round" stroke-linecap="round"/>
     <path class="eq-line" d="${linePath}" fill="none" stroke="${color}" stroke-width="2"
       stroke-linejoin="round" stroke-linecap="round"/>
     <circle class="eq-dot" cx="${x(vals.length - 1)}" cy="${y(last)}" r="3.5" fill="${color}"
-      stroke="var(--bg)" stroke-width="1.5"/>`;
+      stroke="var(--bg)" stroke-width="1.5"/>
+    <g class="eq-cross" style="display:none">
+      <line class="eq-cross-line" x1="0" x2="0" y1="${padT - 8}" y2="${H - padB}"
+        stroke="var(--ink-3)" stroke-width="0.8" stroke-dasharray="3 3"/>
+      <circle class="eq-cross-dot" r="4" fill="${color}" stroke="var(--bg)" stroke-width="1.5"/>
+    </g>`;
+
+  eqGeom = { pts, vals, x, y, W, padX };
 
   // Прорисовка линии «осциллографом» при каждом рендере графика.
   const path = svg.querySelector(".eq-line");
@@ -442,6 +454,67 @@ async function loadEquity() {
   try {
     renderEquity(await api("/api/equity"));
   } catch (e) { /* график не критичен */ }
+}
+
+// ── Скраббинг графика ────────────────────────────────────────────────────────
+// Палец/курсор над графиком: перекрестие прыгает по точкам-сделкам (с
+// хаптиком), подпись показывает дату, сделку и накопленный итог.
+
+let eqGeom = null;   // геометрия последнего рендера
+let eqLastIdx = -1;  // индекс подсвеченной точки — для хаптика по смене
+
+function eqScrub(clientX) {
+  const svg = $("equity-chart");
+  if (!eqGeom || !svg) return;
+  const g = svg.querySelector(".eq-cross");
+  const tip = $("eq-tip");
+  if (!g || !tip) return;
+
+  const { pts, vals, x, y, W, padX } = eqGeom;
+  const r = svg.getBoundingClientRect();
+  const sx = (clientX - r.left) * W / r.width;
+  const step = (W - 2 * padX) / (pts.length - 1);
+  const i = Math.max(0, Math.min(pts.length - 1, Math.round((sx - padX) / step)));
+
+  const px = x(i), py = y(vals[i]);
+  g.style.display = "";
+  const line = g.querySelector(".eq-cross-line");
+  line.setAttribute("x1", px);
+  line.setAttribute("x2", px);
+  const dot = g.querySelector(".eq-cross-dot");
+  dot.setAttribute("cx", px);
+  dot.setAttribute("cy", py);
+
+  const p = pts[i];
+  const trade = p.symbol
+    ? `<b>${p.symbol.replace("USDT", "")}</b> ${pnlSpan(p.pnlPct, "%", 1)} · ` : "";
+  tip.innerHTML = `${fmtDate(p.time)} · ${trade}Σ ${pnlSpan(p.cumPct, "%", 1)}`;
+  tip.style.display = "";
+  const cssX = px / W * r.width;
+  tip.style.left = Math.max(0, Math.min(r.width - tip.offsetWidth, cssX - tip.offsetWidth / 2)) + "px";
+
+  if (i !== eqLastIdx) {
+    haptic();
+    eqLastIdx = i;
+  }
+}
+
+function eqScrubEnd() {
+  eqLastIdx = -1;
+  const svg = $("equity-chart");
+  const g = svg && svg.querySelector(".eq-cross");
+  if (g) g.style.display = "none";
+  const tip = $("eq-tip");
+  if (tip) tip.style.display = "none";
+}
+
+{
+  const wrap = $("equity-wrap");
+  wrap.addEventListener("pointerdown", (e) => eqScrub(e.clientX));
+  wrap.addEventListener("pointermove", (e) => eqScrub(e.clientX));
+  wrap.addEventListener("pointerup", eqScrubEnd);
+  wrap.addEventListener("pointercancel", eqScrubEnd);
+  wrap.addEventListener("pointerleave", eqScrubEnd);
 }
 
 // ── Сделки ───────────────────────────────────────────────────────────────────
@@ -590,7 +663,8 @@ document.querySelectorAll(".tab").forEach((b) =>
 // начатые на горизонтально скроллящихся фильтрах, и явно вертикальные.
 let swipeX = null, swipeY = null;
 document.querySelector("main").addEventListener("touchstart", (e) => {
-  if (e.target.closest(".filters")) { swipeX = null; return; }
+  // фильтры скроллятся горизонтально, по графику скраббинг — не свайпаем
+  if (e.target.closest(".filters") || e.target.closest("#equity-wrap")) { swipeX = null; return; }
   swipeX = e.touches[0].clientX;
   swipeY = e.touches[0].clientY;
 }, { passive: true });
