@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"log"
 	"math"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
@@ -75,6 +77,11 @@ func main() {
 		`ALTER TABLE positions ADD COLUMN IF NOT EXISTS order_id TEXT`,
 		`ALTER TABLE positions ADD COLUMN IF NOT EXISTS qty FLOAT8`,
 		`ALTER TABLE positions ADD COLUMN IF NOT EXISTS pnl FLOAT8`,
+		`CREATE TABLE IF NOT EXISTS bot_settings (
+			key        TEXT        PRIMARY KEY,
+			value      TEXT        NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
 	} {
 		if _, err := db.Exec(context.Background(), stmt); err != nil {
 			log.Printf("[webapp] schema bootstrap: %v", err)
@@ -106,6 +113,7 @@ func main() {
 	mux.HandleFunc("/api/signals", s.authMiddleware(s.handleSignals))
 	mux.HandleFunc("/api/equity", s.authMiddleware(s.handleEquity))
 	mux.HandleFunc("/api/stats", s.authMiddleware(s.handleStats))
+	mux.HandleFunc("/api/settings", s.authMiddleware(s.handleSettings))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -167,6 +175,49 @@ func limitParam(r *http.Request, def, max int) int {
 		return max
 	}
 	return n
+}
+
+// handleSettings — авторежим бота. Настройка живёт в bot_settings (общая с
+// tradebot): переключение здесь равнозначно команде /auto в Telegram.
+func (s *server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if r.Method == http.MethodPost {
+		var req struct {
+			Auto bool `json:"auto"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErr(w, err)
+			return
+		}
+		v := "0"
+		if req.Auto {
+			v = "1"
+		}
+		if _, err := s.db.Exec(ctx, `
+			INSERT INTO bot_settings (key, value, updated_at) VALUES ('auto_trade', $1, NOW())
+			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`, v); err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, map[string]bool{"auto": req.Auto})
+		return
+	}
+
+	// Ключа ещё нет — дефолт тот же, что у бота: AUTO_TRADE из .env.
+	auto := getenv("AUTO_TRADE", "false") == "true"
+	var v string
+	err := s.db.QueryRow(ctx, `SELECT value FROM bot_settings WHERE key = 'auto_trade'`).Scan(&v)
+	switch {
+	case err == nil:
+		auto = v == "1"
+	case errors.Is(err, pgx.ErrNoRows):
+		// оставляем дефолт
+	default:
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, map[string]bool{"auto": auto})
 }
 
 func (s *server) handleTrades(w http.ResponseWriter, r *http.Request) {

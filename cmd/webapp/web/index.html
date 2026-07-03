@@ -7,7 +7,7 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&family=Sora:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -24,9 +24,30 @@
       </div>
     </div>
     <div class="topbar-actions">
+      <div class="theme-wrap">
+        <button id="theme-btn" class="icon-btn" aria-label="Тема оформления">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="9"/>
+            <path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" stroke="none"/>
+          </svg>
+        </button>
+        <div id="theme-menu" hidden>
+          <button class="theme-opt" data-theme="obsidian">
+            <span class="sw sw-obsidian"></span>Obsidian
+            <svg class="check" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
+          <button class="theme-opt" data-theme="neo">
+            <span class="sw sw-neo"></span>Неоморфизм
+            <svg class="check" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
+        </div>
+      </div>
       <button id="zen-btn" class="icon-btn" aria-label="Дзен-режим">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M12 3A9 9 0 0 1 12 21A4.5 4.5 0 0 1 12 12A4.5 4.5 0 0 0 12 3Z" fill="currentColor" stroke="none"/>
+          <circle cx="12" cy="7.5" r="1.5" fill="currentColor" stroke="none"/>
+          <circle cx="12" cy="16.5" r="1.5" fill="var(--panel)" stroke="none"/>
         </svg>
       </button>
       <button id="refresh" class="icon-btn" aria-label="Обновить">
@@ -53,6 +74,16 @@
 
       <div id="stat-grid" class="stat-grid"></div>
       <div id="expectation" class="expectation" style="display:none"></div>
+
+      <div id="auto-row" class="card setting-row" style="display:none">
+        <div class="setting-text">
+          <div class="setting-title">🤖 Авторежим</div>
+          <div class="setting-sub">Сигналы исполняются без подтверждения</div>
+        </div>
+        <button id="auto-toggle" class="switch" role="switch" aria-checked="false" aria-label="Авторежим">
+          <span class="knob"></span>
+        </button>
+      </div>
 
       <div class="card chart-card">
         <div class="card-title-row">

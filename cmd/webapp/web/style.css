@@ -2,7 +2,7 @@
    Минималистичный дашборд в духе приложения Obsidian.
    Плоско: графитовые панели, тонкие границы, без блюра/градиентов/свечения.
    Единственный акцент — приглушённый фиолетовый Obsidian, только на активном.
-   Цвет данных — лишь у PnL (мягкие зелёный/красный). Дзен — тёплый и тише.
+   Цвет данных — лишь у PnL (мягкие зелёный/красный). Дзен прячет деньги.
    ════════════════════════════════════════════════════════════════════════ */
 
 :root {
@@ -112,6 +112,50 @@ body {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
+
+/* ───────────────────── Меню выбора темы ───────────────────── */
+.theme-wrap { position: relative; }
+#theme-menu {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  z-index: 50;
+  min-width: 176px;
+  padding: 5px;
+  background: var(--panel);
+  border: 1px solid var(--hair-2);
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+.theme-opt {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  color: var(--ink-2);
+  font-family: var(--ff-ui);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+.theme-opt.active { color: var(--ink); background: var(--panel-2); }
+.theme-opt .sw {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--hair-2);
+}
+.sw-obsidian { background: linear-gradient(135deg, #202125 55%, #8b80cc 55%); }
+.sw-neo      { background: radial-gradient(circle at 32% 30%, #3d4150, #191b21 72%); }
+.theme-opt .check { margin-left: auto; visibility: hidden; color: var(--accent); }
+.theme-opt.active .check { visibility: visible; }
 
 /* ════════════════════════════ Вкладки ══════════════════════════════════ */
 #tabs {
@@ -413,6 +457,45 @@ h2, .section-h {
   color: var(--ink);
 }
 
+/* ════════════════ Настройки (авторежим) ════════════════════════════════ */
+.setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.setting-title { font-weight: 600; font-size: 13.5px; }
+.setting-sub { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
+
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 42px; height: 25px;
+  border-radius: 13px;
+  border: 1px solid var(--hair-2);
+  background: var(--panel-2);
+  cursor: pointer;
+  transition: background 0.2s var(--ease), border-color 0.2s;
+}
+.switch .knob {
+  position: absolute;
+  top: 50%; left: 3px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--ink-2);
+  transform: translateY(-50%);
+  transition: transform 0.22s var(--ease), background 0.2s;
+}
+.switch.on {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.switch.on .knob {
+  transform: translate(17px, -50%);
+  background: var(--accent);
+}
+.switch:disabled { opacity: 0.5; }
+
 /* ════════════════ Сравнение с бэктестом ════════════════════════════════ */
 .expectation {
   border-radius: var(--radius);
@@ -454,25 +537,132 @@ h2, .section-h {
 .skel-card { height: 64px; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 
-/* ════════════════ Дзен-режим — тёплый и ещё тише ═══════════════════════ */
-body.zen {
-  --accent: #9a8f7e;
-  --pos:  #7e9a8d;
-  --neg:  #a88f94;
-  --bg:   #16140f;
-  --bg-2: #16140f;
-  --panel: #1c1a14;
-  --panel-2: #221f18;
-  --ink:  #e2ddd3;
-  --ink-2: #aaa498;
-  --ink-3: #7c766b;
-}
+/* ════════════════ Дзен-режим ═══════════════════════════════════════════
+   Палитру не трогаем — просто прячем лишние для этого режима значения
+   (деньги, нереализованный PnL, live-пульс). Скрытие делает app.js. */
 body.zen #live-dot { display: none; }
 .zen-title {
   font-family: var(--ff-display);
   font-size: 24px; font-weight: 700;
   letter-spacing: -0.2px;
 }
+
+/* ════════════════ Тема «Неоморфизм» — тёмный soft-UI ═══════════════════════
+   Панели того же цвета, что и фон: форму задаёт свет, а не границы.
+   Две тени — глубокая снизу-справа и лёгкий блик сверху-слева —
+   «выдавливают» элементы из поверхности; активные состояния вдавлены. */
+body.neo {
+  --bg:     #23252d;
+  --bg-2:   #23252d;
+  --panel:  #23252d;
+  --panel-2:#2a2d37;
+  --hair:   rgba(255, 255, 255, 0.05);
+  --hair-2: rgba(255, 255, 255, 0.10);
+
+  --ink:   #d3d6e0;
+  --ink-2: #9599a8;
+  --ink-3: #696e7f;
+
+  --accent: #8f86d8;
+  --pos: #53b98a;
+  --neg: #d6707c;
+
+  --radius: 16px;
+  --ff-ui: "Sora", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  /* пара источников света: глубина + блик */
+  --sh-dark:  #17181e;
+  --sh-light: #2f323e;
+  --shadow-out:    6px 6px 14px var(--sh-dark), -6px -6px 14px var(--sh-light);
+  --shadow-out-sm: 3px 3px 7px var(--sh-dark), -3px -3px 7px var(--sh-light);
+  --shadow-in: inset 3px 3px 7px var(--sh-dark), inset -3px -3px 7px var(--sh-light);
+}
+
+/* выпуклые поверхности: тень вместо границы */
+body.neo .card,
+body.neo .hero,
+body.neo .stat-grid,
+body.neo .row,
+body.neo .expectation {
+  border-color: transparent;
+  box-shadow: var(--shadow-out);
+}
+body.neo .pos { border-color: transparent; box-shadow: var(--shadow-out); }
+body.neo .pos.long  { border-left-color: var(--pos); }
+body.neo .pos.short { border-left-color: var(--neg); }
+
+body.neo .card, body.neo .hero, body.neo .stat-grid, body.neo .expectation { margin-bottom: 13px; }
+body.neo .pos { margin-bottom: 11px; }
+body.neo .row { margin-bottom: 10px; }
+
+/* мелкие выпуклые элементы */
+body.neo .brand-mark,
+body.neo .icon-btn,
+body.neo .chip {
+  background: var(--bg);
+  border-color: transparent;
+  box-shadow: var(--shadow-out-sm);
+}
+body.neo .icon-btn:active { background: var(--bg); box-shadow: var(--shadow-in); }
+body.neo #zen-btn.active  { color: var(--accent); box-shadow: var(--shadow-in); }
+
+/* вкладки: вдавленный жёлоб, выпуклый ползунок */
+body.neo #tabs {
+  background: var(--bg);
+  border-color: transparent;
+  box-shadow: var(--shadow-in);
+  padding: 4px;
+}
+body.neo #tab-glider {
+  top: 4px; bottom: 4px; left: 4px;
+  width: calc((100% - 8px) / 3);
+  background: var(--bg);
+  border: none;
+  box-shadow: var(--shadow-out-sm);
+}
+body.neo .tab.active { color: var(--accent); }
+
+/* фильтры и строки: активное — вдавлено */
+body.neo .chip.active {
+  background: var(--bg);
+  color: var(--accent);
+  box-shadow: var(--shadow-in);
+}
+body.neo .row:active { background: var(--bg); box-shadow: var(--shadow-in); }
+
+body.neo .badge { background: rgba(255, 255, 255, 0.06); color: var(--ink-2); }
+
+/* график в углублении-«ванночке» */
+body.neo #equity-wrap {
+  padding: 10px 8px 7px;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #1e2027, #272a33);
+  box-shadow: var(--shadow-in);
+}
+
+body.neo .skel {
+  background: linear-gradient(90deg, #1f2129 25%, #2b2e38 50%, #1f2129 75%);
+  background-size: 200% 100%;
+}
+
+body.neo #theme-menu {
+  background: var(--bg);
+  border-color: transparent;
+  box-shadow: var(--shadow-out);
+}
+
+/* тумблер: вдавленный жёлоб, выпуклая шайба */
+body.neo .switch {
+  background: var(--bg);
+  border-color: transparent;
+  box-shadow: var(--shadow-in);
+}
+body.neo .switch .knob { background: var(--ink-3); box-shadow: var(--shadow-out-sm); }
+body.neo .switch.on { background: var(--bg); }
+body.neo .switch.on .knob { background: var(--accent); }
+body.neo .theme-opt.active { background: var(--panel-2); }
+
+body.neo .error { background: var(--bg); box-shadow: var(--shadow-out); border-color: transparent; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }

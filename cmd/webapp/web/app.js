@@ -1,11 +1,31 @@
 const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
-// Обсидиановый фон под нативные элементы Telegram. На старых клиентах hex не
+// ── Темы оформления ──────────────────────────────────────────────────────────
+// Тема — класс на <body> (стили в style.css) + подстройка фона/шапки Telegram.
+
+const THEMES = {
+  obsidian: { bg: "#07080b" },
+  neo:      { bg: "#1a1c22" },
+};
+let theme = localStorage.getItem("theme");
+if (!THEMES[theme]) theme = "obsidian";
+
+// Фон под нативные элементы Telegram. На старых клиентах hex не
 // поддерживается — падаем в try/catch на безопасный ключ темы.
-try { tg.setBackgroundColor("#07080b"); } catch (e) { /* старый клиент */ }
-try { tg.setHeaderColor("#07080b"); } catch (e) {
-  try { tg.setHeaderColor("secondary_bg_color"); } catch (e2) { /* старый клиент */ }
+function applyTgColors() {
+  const c = THEMES[theme].bg;
+  try { tg.setBackgroundColor(c); } catch (e) { /* старый клиент */ }
+  try { tg.setHeaderColor(c); } catch (e) {
+    try { tg.setHeaderColor("secondary_bg_color"); } catch (e2) { /* старый клиент */ }
+  }
+}
+
+function applyTheme() {
+  document.body.classList.toggle("neo", theme === "neo");
+  document.querySelectorAll(".theme-opt").forEach((b) =>
+    b.classList.toggle("active", b.dataset.theme === theme));
+  applyTgColors();
 }
 
 // В полноэкранном режиме контент уходит под статус-бар и кнопки Telegram.
@@ -29,13 +49,17 @@ const haptic = (style = "light") => {
   try { tg.HapticFeedback.impactOccurred(style); } catch (e) { /* не критично */ }
 };
 
-async function api(path) {
-  const resp = await fetch(path, {
-    headers: { Authorization: "tma " + tg.initData },
-  });
+async function api(path, body) {
+  const opts = { headers: { Authorization: "tma " + tg.initData } };
+  if (body !== undefined) {
+    opts.method = "POST";
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  const resp = await fetch(path, opts);
   if (!resp.ok) {
-    const body = await resp.json().catch(() => ({}));
-    throw new Error(body.error || resp.status);
+    const respBody = await resp.json().catch(() => ({}));
+    throw new Error(respBody.error || resp.status);
   }
   return resp.json();
 }
@@ -485,6 +509,57 @@ $("zen-btn").addEventListener("click", () => {
   applyZen();
 });
 
+// ── Авторежим (тумблер = команда /auto в боте) ───────────────────────────────
+
+let autoMode = null; // null — ещё не загружен, ряд скрыт
+
+function renderAutoRow() {
+  if (autoMode == null) return;
+  $("auto-row").style.display = "";
+  const t = $("auto-toggle");
+  t.classList.toggle("on", autoMode);
+  t.setAttribute("aria-checked", String(autoMode));
+}
+
+async function loadSettings() {
+  try {
+    autoMode = !!(await api("/api/settings")).auto;
+    renderAutoRow();
+  } catch (e) { /* нет доступа к настройкам — ряд остаётся скрытым */ }
+}
+
+$("auto-toggle").addEventListener("click", async () => {
+  if (autoMode == null) return;
+  haptic("medium");
+  const want = !autoMode;
+  autoMode = want; // оптимистично, откатим при ошибке
+  renderAutoRow();
+  try {
+    autoMode = !!(await api("/api/settings", { auto: want })).auto;
+  } catch (e) {
+    autoMode = !want;
+  }
+  renderAutoRow();
+});
+
+const themeMenu = $("theme-menu");
+$("theme-btn").addEventListener("click", () => {
+  haptic();
+  themeMenu.hidden = !themeMenu.hidden;
+});
+document.querySelectorAll(".theme-opt").forEach((b) =>
+  b.addEventListener("click", () => {
+    haptic("medium");
+    theme = b.dataset.theme;
+    localStorage.setItem("theme", theme);
+    applyTheme();
+    themeMenu.hidden = true;
+  }));
+// тап вне меню закрывает его
+document.addEventListener("click", (e) => {
+  if (!themeMenu.hidden && !e.target.closest(".theme-wrap")) themeMenu.hidden = true;
+});
+
 $("refresh").addEventListener("click", async () => {
   haptic("medium");
   const btn = $("refresh");
@@ -498,9 +573,11 @@ $("refresh").addEventListener("click", async () => {
 
 document.body.classList.toggle("zen", zen);
 $("zen-btn").classList.toggle("active", zen);
+applyTheme();
 loadOverview();
 loadEquity();
 loadStats();
+loadSettings();
 connectLive();
 // Поллинг — только как фолбэк, пока нет живого WS-соединения.
 setInterval(() => { if (!wsLive) loadOverview(); }, 10000);
