@@ -392,7 +392,12 @@ function renderEquity(pts) {
     $("equity-wrap").innerHTML = `<div class="muted">Недостаточно закрытых сделок для графика</div>`;
     return;
   }
-  const W = 340, H = 140, padX = 4, padT = 12, padB = 6;
+  // viewBox = фактические пиксели контейнера: масштаб 1:1 по обеим осям,
+  // иначе preserveAspectRatio=none плющит круги и тени в эллипсы
+  const W = Math.max(200, svg.clientWidth || 340);
+  const H = svg.clientHeight || 116;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const padX = 4, padT = 12, padB = 6;
   const vals = pts.map((p) => p.cumPct);
   const last = vals[vals.length - 1];
   const min = Math.min(0, ...vals), max = Math.max(0, ...vals);
@@ -516,6 +521,13 @@ function eqScrubEnd() {
   wrap.addEventListener("pointercancel", eqScrubEnd);
   wrap.addEventListener("pointerleave", eqScrubEnd);
 }
+
+// перерисовка под новую ширину (поворот экрана, ресайз окна)
+let eqResizeT = 0;
+window.addEventListener("resize", () => {
+  clearTimeout(eqResizeT);
+  eqResizeT = setTimeout(() => { if (lastEquityPts) renderEquity(lastEquityPts); }, 150);
+});
 
 // ── Сделки ───────────────────────────────────────────────────────────────────
 
