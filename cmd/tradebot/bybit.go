@@ -266,6 +266,8 @@ type Position struct {
 	Leverage      float64
 	UnrealisedPnl float64
 	MarkPrice     float64
+	StopLoss      float64
+	TakeProfit    float64
 }
 
 func (c *BybitClient) Positions() ([]Position, error) {
@@ -282,6 +284,8 @@ func (c *BybitClient) Positions() ([]Position, error) {
 			Leverage      string `json:"leverage"`
 			UnrealisedPnl string `json:"unrealisedPnl"`
 			MarkPrice     string `json:"markPrice"`
+			StopLoss      string `json:"stopLoss"`
+			TakeProfit    string `json:"takeProfit"`
 		} `json:"list"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
@@ -301,9 +305,25 @@ func (c *BybitClient) Positions() ([]Position, error) {
 			Leverage:      pf(p.Leverage),
 			UnrealisedPnl: pf(p.UnrealisedPnl),
 			MarkPrice:     pf(p.MarkPrice),
+			StopLoss:      pf(p.StopLoss),
+			TakeProfit:    pf(p.TakeProfit),
 		})
 	}
 	return out, nil
+}
+
+// CloseMarket закрывает позицию рыночным reduce-only ордером.
+// closeSide — сторона закрывающего ордера (для лонга это Sell).
+func (c *BybitClient) CloseMarket(symbol, closeSide, qty string) error {
+	_, err := c.post("/v5/order/create", map[string]string{
+		"category":   "linear",
+		"symbol":     symbol,
+		"side":       closeSide,
+		"orderType":  "Market",
+		"qty":        qty,
+		"reduceOnly": "true",
+	})
+	return err
 }
 
 // ── Set leverage ──────────────────────────────────────────────────────────────
@@ -338,8 +358,13 @@ func (c *BybitClient) PlaceOrder(symbol, side, qty, price, sl, tp string) (*Orde
 		"qty":         qty,
 		"price":       price,
 		"timeInForce": "GTC",
-		"stopLoss":    sl,
-		"takeProfit":  tp,
+	}
+	// SL/TP опциональны: "0" у позиции без стопа не должен уходить в API
+	if sl != "" && sl != "0" {
+		payload["stopLoss"] = sl
+	}
+	if tp != "" && tp != "0" {
+		payload["takeProfit"] = tp
 	}
 	raw, err := c.post("/v5/order/create", payload)
 	if err != nil {
@@ -354,9 +379,14 @@ func (c *BybitClient) PlaceOrder(symbol, side, qty, price, sl, tp string) (*Orde
 
 // ── Daily klines ──────────────────────────────────────────────────────────────
 
-// DailyCloses возвращает последние n дневных закрытий (от старых к новым;
-// последний элемент — текущий, ещё не закрытый день).
-func (c *BybitClient) DailyCloses(symbol string, n int) ([]float64, error) {
+// DailyBar — дневная свеча (используется мониторами BTC).
+type DailyBar struct {
+	High, Low, Close float64
+}
+
+// DailyBars возвращает последние n дневных свечей (от старых к новым;
+// последняя — текущий, ещё не закрытый день).
+func (c *BybitClient) DailyBars(symbol string, n int) ([]DailyBar, error) {
 	raw, err := c.get("/v5/market/kline",
 		fmt.Sprintf("category=linear&symbol=%s&interval=D&limit=%d", symbol, n))
 	if err != nil {
@@ -368,13 +398,26 @@ func (c *BybitClient) DailyCloses(symbol string, n int) ([]float64, error) {
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return nil, err
 	}
-	out := make([]float64, 0, len(res.List))
+	out := make([]DailyBar, 0, len(res.List))
 	for i := len(res.List) - 1; i >= 0; i-- {
 		row := res.List[i]
 		if len(row) < 5 {
 			continue
 		}
-		out = append(out, pf(row[4]))
+		out = append(out, DailyBar{High: pf(row[2]), Low: pf(row[3]), Close: pf(row[4])})
+	}
+	return out, nil
+}
+
+// DailyCloses возвращает последние n дневных закрытий (от старых к новым).
+func (c *BybitClient) DailyCloses(symbol string, n int) ([]float64, error) {
+	bars, err := c.DailyBars(symbol, n)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]float64, len(bars))
+	for i, b := range bars {
+		out[i] = b.Close
 	}
 	return out, nil
 }

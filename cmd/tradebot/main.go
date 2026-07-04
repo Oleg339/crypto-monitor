@@ -26,6 +26,10 @@ type Config struct {
 	// Авторежим пропускает лонги, когда BTC ближе этого процента к своему
 	// 10-дневному максимуму (исторически токсичная зона). 0 = фильтр выключен.
 	BTCHighSkipPct float64
+	// Просадка BTC от 10-дневного максимума, при которой бот закрывает
+	// открытые позиции (кнопки; в авторежиме сам) и перезаходит на отбое.
+	// 0 = выключено.
+	BTCDipExitPct float64
 	// Paper trading
 	PaperTrading       bool
 	DatabaseURL        string
@@ -61,6 +65,7 @@ func loadConfig() *Config {
 		Leverage:       getenvF("LEVERAGE", 3),
 		AutoTrade:      getenv("AUTO_TRADE", "false") == "true",
 		BTCHighSkipPct: getenvF("BTC_HIGH_SKIP_PCT", 4),
+		BTCDipExitPct:  getenvF("BTC_DIP_EXIT_PCT", 6),
 		PaperTrading:       getenv("PAPER_TRADING", "false") == "true",
 		DatabaseURL:        getenv("DATABASE_URL", ""),
 		PaperInitialEquity: getenvF("PAPER_INITIAL_EQUITY", 1000),
@@ -162,6 +167,11 @@ func main() {
 		log.Println("[monitor] price monitor started")
 	} else if cfg.OrderTTLDays > 0 {
 		go runLiveTTL(ctx, bybit, bot, cfg)
+	}
+
+	// Монитор просадки BTC: нужен доступ к БД (состояние и парковка сетапов)
+	if paper != nil && !cfg.PaperTrading && cfg.BTCDipExitPct > 0 {
+		go bot.RunDipMonitor(ctx)
 	}
 
 	ub := newUserbot(cfg, bot)

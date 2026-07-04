@@ -1068,6 +1068,35 @@ func (b *Bot) handleCallback(cb *tgCallback) {
 		return
 	}
 
+	// ── dip-механика: закрытие на просадке BTC и перезаход на отбое ──────────
+	if strings.HasPrefix(action, "dip") && b.paper == nil {
+		return // без БД монитор не работает, кнопки — от старых сообщений
+	}
+	switch action {
+	case "dipclose":
+		n, pnl := b.dipCloseAll(context.Background())
+		b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID, fmt.Sprintf(
+			"📉 <b>Закрыто позиций: %d</b> (нереализ. PnL %+.2f$)\nЖду отбоя BTC — предложу перезайти.", n, pnl), nil)
+		return
+	case "dipignore":
+		b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID, "Ок, позиции не тронуты.", nil)
+		return
+	case "dipreenter":
+		n := b.dipReenterAll(context.Background())
+		b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID, fmt.Sprintf(
+			"📈 <b>Перевыставлено лимитников: %d</b> по ценам старых входов.", n), nil)
+		return
+	case "dipdrop":
+		parked, _ := b.paper.ParkedSetups(context.Background())
+		for _, p := range parked {
+			if err := b.paper.SetParkedStatus(context.Background(), p.ID, "dropped"); err != nil {
+				log.Printf("[dip] drop %d: %v", p.ID, err)
+			}
+		}
+		b.editMsg(cb.Message.Chat.ID, cb.Message.MessageID, "Ок, перезаход отменён.", nil)
+		return
+	}
+
 	b.mu.Lock()
 	sig, ok := b.pending[id]
 	b.mu.Unlock()
@@ -1110,19 +1139,11 @@ func (b *Bot) btcHighWarn() string {
 	if pct <= 0 {
 		return ""
 	}
-	closes, err := b.bybit.DailyCloses("BTCUSDT", 11)
-	if err != nil || len(closes) < 3 {
-		log.Printf("[bot] btc-high check failed: %v (closes=%d)", err, len(closes))
+	dist, err := b.btcDistFrom10dHigh()
+	if err != nil {
+		log.Printf("[bot] btc-high check failed: %v", err)
 		return "\n\n⚠️ <i>Авторежим: не смог проверить положение BTC — реши вручную</i>"
 	}
-	last := closes[len(closes)-1]
-	mx := closes[0]
-	for _, c := range closes {
-		if c > mx {
-			mx = c
-		}
-	}
-	dist := (last/mx - 1) * 100 // ≤ 0: насколько BTC ниже максимума
 	log.Printf("[bot] btc vs 10d high: %.2f%% (порог %.0f%%)", dist, pct)
 	if dist > -pct {
 		return fmt.Sprintf(

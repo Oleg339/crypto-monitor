@@ -125,7 +125,68 @@ func newPaperStore(ctx context.Context, dsn string) (*PaperStore, error) {
 	if _, err = pool.Exec(ctx, createSettingsTableSQL); err != nil {
 		return nil, fmt.Errorf("create settings table: %w", err)
 	}
+	if _, err = pool.Exec(ctx, createParkedTableSQL); err != nil {
+		return nil, fmt.Errorf("create parked table: %w", err)
+	}
 	return &PaperStore{pool: pool}, nil
+}
+
+// ── Parked setups — позиции, закрытые на просадке BTC, ждущие перезахода ──────
+
+const createParkedTableSQL = `
+CREATE TABLE IF NOT EXISTS parked_setups (
+    id          SERIAL PRIMARY KEY,
+    symbol      TEXT        NOT NULL,
+    side        TEXT        NOT NULL,
+    qty         FLOAT8      NOT NULL,
+    entry_price FLOAT8      NOT NULL,
+    sl          FLOAT8      NOT NULL,
+    tp          FLOAT8      NOT NULL,
+    parked_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    status      TEXT        NOT NULL DEFAULT 'parked'
+);`
+
+type ParkedSetup struct {
+	ID         int64
+	Symbol     string
+	Side       string
+	Qty        float64
+	EntryPrice float64
+	SL         float64
+	TP         float64
+	ParkedAt   time.Time
+}
+
+func (s *PaperStore) ParkSetup(ctx context.Context, p *ParkedSetup) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO parked_setups (symbol, side, qty, entry_price, sl, tp)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		p.Symbol, p.Side, p.Qty, p.EntryPrice, p.SL, p.TP)
+	return err
+}
+
+func (s *PaperStore) ParkedSetups(ctx context.Context) ([]*ParkedSetup, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, symbol, side, qty, entry_price, sl, tp, parked_at
+		FROM parked_setups WHERE status = 'parked' ORDER BY parked_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*ParkedSetup
+	for rows.Next() {
+		p := &ParkedSetup{}
+		if err := rows.Scan(&p.ID, &p.Symbol, &p.Side, &p.Qty, &p.EntryPrice, &p.SL, &p.TP, &p.ParkedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *PaperStore) SetParkedStatus(ctx context.Context, id int64, status string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE parked_setups SET status = $2 WHERE id = $1`, id, status)
+	return err
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
