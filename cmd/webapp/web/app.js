@@ -325,116 +325,123 @@ function gardenReadoutHTML() {
     `<div class="gr-sub">вход $${fmtPrice(p.entryPrice)} · марк $${fmtPrice(p.markPrice)} · до TP ${(m.tp * 100).toFixed(0)}% — ${stage}</div>`;
 }
 
-// пиксельная изо-платформа (грядка): верх-трава + слои земли/камня
-function drawPlatform(px, py, halfW, SH) {
-  const halfH = halfW / 2;
-  const grass = ["#7bbd5b", "#6fae54", "#66a24c"], grassEdge = "#88c96a";
-  const dirt = "#7a5636", dirtD = "#5f4227", stone = "#8d99a6", stoneD = "#6f7b88", mortar = "#586570";
+// одна пиксельная изо-плитка травы с тонким краем (земля)
+function drawTile(X, Y, TW, TH, EH, alt) {
+  const top = alt ? "#6bae4c" : "#7cc05a";
+  const rim = lerpColor(top, "#2f4f22", 0.38);
+  const rimL = lerpColor(rim, "#000000", 0.18);
+  const dirt = "#caa25a", dirtD = "#a17a3c";
+  const hh = TH / 2;
   let s = "";
-  // верхняя травяная плоскость — построчно, ступенчатый ромб
-  for (let dy = -halfH; dy <= halfH; dy++) {
-    const hx = Math.round(halfW * (1 - Math.abs(dy) / halfH));
+  for (let dy = -hh; dy <= hh; dy++) {
+    const hx = Math.round((TW / 2) * (1 - Math.abs(dy) / hh));
     if (hx <= 0) continue;
-    const y = Math.round(py + dy);
-    const shade = dy < -halfH * 0.4 ? grass[0] : dy > halfH * 0.4 ? grass[2] : grass[1];
-    s += `<rect x="${px - hx}" y="${y}" width="${2 * hx + PX}" height="${PX}" fill="${shade}"/>`;
-    if (Math.abs(dy) <= 1) s += `<rect x="${px - hx}" y="${y}" width="${2 * hx + PX}" height="${PX}" fill="${grassEdge}" opacity="0.4"/>`;
+    s += `<rect x="${X - hx}" y="${Math.round(Y + dy)}" width="${2 * hx + PX}" height="${PX}" fill="${top}"/>`;
   }
-  // травяная «крошка»-текстура
-  for (let i = 0; i < halfW; i++) {
-    const a = (i * 37) % (2 * halfW) - halfW, dy = ((i * 53) % halfH) - halfH / 2;
-    const hx = halfW * (1 - Math.abs(dy) / halfH);
-    if (Math.abs(a) < hx - 2) s += `<rect x="${Math.round(px + a)}" y="${Math.round(py + dy)}" width="${PX}" height="${PX}" fill="${grass[2]}" opacity="0.6"/>`;
-  }
-  // боковые грани — вертикальные полосы земли с каменной кладкой снизу
-  for (let x = -halfW; x <= halfW; x++) {
-    const bottomY = Math.round(py + (halfW - Math.abs(x)) / 2);
-    const col = px + x;
-    const left = x < 0;
-    s += `<rect x="${col}" y="${bottomY}" width="${PX}" height="${SH}" fill="${left ? dirtD : dirt}"/>`;
-    // горизонтальная прослойка земли
-    s += `<rect x="${col}" y="${bottomY + 2}" width="${PX}" height="${PX}" fill="${dirtD}" opacity="0.6"/>`;
-    // каменная кладка у основания
-    s += `<rect x="${col}" y="${bottomY + SH - 4}" width="${PX}" height="4" fill="${left ? stoneD : stone}"/>`;
-    if ((x + 100) % 4 === 0) s += `<rect x="${col}" y="${bottomY + SH - 4}" width="${PX}" height="4" fill="${mortar}"/>`;
-    s += `<rect x="${col}" y="${bottomY + SH - 2}" width="${PX}" height="${PX}" fill="${mortar}" opacity="0.7"/>`;
+  for (let x = -TW / 2; x <= TW / 2; x++) {
+    const by = Math.round(Y + hh * (1 - Math.abs(x) / (TW / 2)));
+    const col = X + x, left = x < 0;
+    s += `<rect x="${col}" y="${by}" width="${PX}" height="${EH}" fill="${left ? rimL : rim}"/>`;
+    s += `<rect x="${col}" y="${by + EH - 1}" width="${PX}" height="${PX + 0.5}" fill="${left ? dirtD : dirt}"/>`;
   }
   return s;
 }
 
-const DECOR = {
+// декоративная зелень на «пустых» плитках — фон для растений-позиций
+const AMB_PAL = {
+  G: "#3d8b41", g: "#57a552", l: "#6cb857", T: "#7a5535", t: "#573b22",
+  P: "#ff9ab8", p: "#ffd3e0", Y: "#f4c542", y: "#d79a25", B: "#6e4522",
+  r: "#e0564f", w: "#ffffff", m: "#d8473f", M: "#a82f2a", s: "#efe6cf",
+  c: "#e05a4f", C: "#b5372f",
+};
+const AMB = {
   tuft: ["l l", "gGg"],
   flower: [" P ", "PpP", " g ", "gGg"],
+  coral: [" c c c ", " cCcCc ", "cCcccCc", " CgGgC ", "  gGg  "],
 };
-const DECOR_PAL = { l: "#9ad06f", g: "#5f9a45", G: "#4c7f38", P: "#ff8fb0", p: "#ffd0dd" };
 
 function renderGarden(ov) {
   lastGardenRender = Date.now();
   const el = $("garden");
   if (!el) return;
-  const pos = (ov.positions || []).slice(0, 12);
+  const pos = (ov.positions || []).slice(0, 16);
   const bal = ov.balance || {};
-  const TW = 30, TH = 15, SH = 12;
+  const TW = 24, TH = 12, EH = 4;
   const n = pos.length;
-  const cols = n <= 1 ? 2 : n <= 6 ? 3 : 4;
-  const rows = Math.max(2, Math.ceil(Math.max(n, cols) / cols));
+  const G = Math.max(5, Math.min(6, Math.ceil(Math.sqrt(Math.max(1, n))) + 3));
   const iso = (c, r) => ({ x: (c - r) * TW / 2, y: (c + r) * TH / 2 });
 
   const cells = [];
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) cells.push({ c, r, idx: r * cols + c });
+  for (let r = 0; r < G; r++) for (let c = 0; c < G; c++) cells.push({ c, r });
   cells.sort((a, b) => (a.c + a.r) - (b.c + b.r) || a.c - b.c);
 
-  // границы центров плиток → размер платформы
-  let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+  // растения-позиции раскидываем по плиткам псевдослучайно
+  const shuffled = cells.map((c) => ({ c, k: hashStr(c.c + "_" + c.r + "s") })).sort((a, b) => a.k - b.k).map((o) => o.c);
+  const posMap = new Map();
+  shuffled.slice(0, n).forEach((cell, i) => posMap.set(cell.c * 100 + cell.r, i));
+
+  let minY = 1e9, maxX = -1e9, minX = 1e9, maxY = -1e9;
   cells.forEach((cell) => {
     const { x, y } = iso(cell.c, cell.r);
     minX = Math.min(minX, x); maxX = Math.max(maxX, x);
     minY = Math.min(minY, y); maxY = Math.max(maxY, y);
   });
-  const pcx = (minX + maxX) / 2, pcy = (minY + maxY) / 2;
-  const halfW = Math.round((maxX - minX) / 2 + TW * 0.9);
-  const platform = drawPlatform(pcx, pcy, halfW, SH);
 
-  // почвенные лунки под растениями + декор на пустых плитках
-  let soil = "", decor = "";
-  const plants = [];
+  // плитки — задними рядами вперёд (шахматная раскраска)
+  let tiles = "";
   cells.forEach((cell) => {
     const { x, y } = iso(cell.c, cell.r);
-    if (cell.idx < n) {
-      soil += `<ellipse cx="${x}" cy="${y}" rx="7" ry="3" fill="#6b4f34"/><ellipse cx="${x}" cy="${y - 0.5}" rx="5" ry="2" fill="#7c5c3c"/>`;
-      plants.push({ cell, x, y, p: pos[cell.idx], i: cell.idx });
-    } else if ((hashStr("d" + cell.idx) % 3) !== 0) {
-      const d = (hashStr("f" + cell.idx) % 2) ? DECOR.flower : DECOR.tuft;
-      decor += `<g transform="translate(${x},${y})">${sprite(d, DECOR_PAL, -1, -d.length)}</g>`;
+    tiles += drawTile(x, y, TW, TH, EH, (cell.c + cell.r) % 2);
+  });
+
+  // пропсы: растения-позиции (кликабельны) + фоновая зелень, сорт по глубине
+  const props = [];
+  cells.forEach((cell) => {
+    const { x, y } = iso(cell.c, cell.r);
+    const depth = cell.c + cell.r;
+    const key = cell.c * 100 + cell.r;
+    if (posMap.has(key)) {
+      const i = posMap.get(key);
+      const p = pos[i], m = posMetrics(p);
+      const droop = m.sl > 0.45 ? (m.sl - 0.45) * 14 * (m.long ? 1 : -1) : 0;
+      const wilt = m.sl > 0.6 || m.roe < -18;
+      const sway = (3.4 + (hashStr(p.symbol) % 10) * 0.12).toFixed(2);
+      const delay = ((hashStr(p.symbol) % 20) * 0.15).toFixed(2);
+      const sel = p.symbol === gardenSelSym;
+      let g = `<g class="garden-plant${sel ? " sel" : ""}" data-i="${i}" transform="translate(${x.toFixed(1)},${y.toFixed(1)})">`;
+      g += `<rect x="-5" y="-2" width="10" height="3" fill="#6b4f34"/><rect x="-6" y="-1" width="12" height="2" fill="#6b4f34"/>`; // лунка
+      if (sel) g += `<rect x="-9" y="-24" width="18" height="26" fill="none" stroke="#ffe08a" stroke-width="1"/>`;
+      g += `<rect x="-9" y="-24" width="18" height="26" fill="transparent"/>`;
+      g += `<g class="${wilt ? "" : "garden-sway"}" style="animation-duration:${sway}s;animation-delay:${delay}s" transform="rotate(${droop.toFixed(1)})" opacity="${wilt ? 0.7 : 1}">${plantBody(p, m)}</g>`;
+      g += `<rect x="8" y="-13" width="${PX}" height="13" fill="#5b4a34"/><rect x="9" y="-13" width="4" height="3" fill="${m.long ? "#37b26a" : "#e0566a"}"/></g>`;
+      props.push({ depth, y, svg: g });
+    } else {
+      const h = hashStr("a" + cell.c + "_" + cell.r) % 10;
+      let rows = null;
+      if (h < 3) rows = null;              // пустая трава
+      else if (h < 5) rows = SPRITES[4];   // ёлочка
+      else if (h < 6) rows = SPRITES[0];   // дуб
+      else if (h < 8) rows = AMB.flower;
+      else if (h < 9) rows = AMB.coral;
+      else rows = AMB.tuft;
+      if (rows) {
+        const svg = `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)})">${sprite(rows, AMB_PAL, -Math.floor(rows[0].length / 2), -rows.length)}</g>`;
+        props.push({ depth, y, svg });
+      }
     }
   });
-  plants.sort((a, b) => (a.cell.c + a.cell.r) - (b.cell.c + b.cell.r));
-
-  let plantSvg = "";
-  plants.forEach((pl) => {
-    const m = posMetrics(pl.p);
-    const droop = m.sl > 0.45 ? (m.sl - 0.45) * 14 * (m.long ? 1 : -1) : 0;
-    const wilt = m.sl > 0.6 || m.roe < -18;
-    const sway = (3.4 + (hashStr(pl.p.symbol) % 10) * 0.12).toFixed(2);
-    const delay = ((hashStr(pl.p.symbol) % 20) * 0.15).toFixed(2);
-    const sel = pl.p.symbol === gardenSelSym;
-    plantSvg += `<g class="garden-plant${sel ? " sel" : ""}" data-i="${pl.i}" transform="translate(${pl.x.toFixed(1)},${pl.y.toFixed(1)})">`;
-    if (sel) plantSvg += `<rect x="-9" y="-24" width="18" height="26" fill="none" stroke="#ffe08a" stroke-width="1"/>`;
-    plantSvg += `<rect x="-9" y="-24" width="18" height="26" fill="transparent"/>`; // клик-зона
-    plantSvg += `<g class="${wilt ? "" : "garden-sway"}" style="animation-duration:${sway}s;animation-delay:${delay}s" transform="rotate(${droop.toFixed(1)})" opacity="${wilt ? 0.7 : 1}">${plantBody(pl.p, m)}</g>`;
-    // пиксельный флажок направления
-    plantSvg += `<rect x="8" y="-13" width="${PX}" height="13" fill="#5b4a34"/><rect x="9" y="-13" width="4" height="3" fill="${m.long ? "#37b26a" : "#e0566a"}"/>`;
-    plantSvg += `</g>`;
-  });
+  props.sort((a, b) => a.depth - b.depth || a.y - b.y);
+  const propSvg = props.map((p) => p.svg).join("");
 
   // границы вьюпорта
-  const vbMinX = pcx - halfW - 2, vbW = 2 * halfW + 4;
-  const vbMinY = minY - 30, vbMaxY = pcy + halfW / 2 + SH + 3;
+  const pad = TW / 2 + 2;
+  const vbMinX = minX - pad, vbW = (maxX - minX) + 2 * pad;
+  const vbMinY = minY - 26, vbMaxY = maxY + TH / 2 + EH + 3;
   const vbH = vbMaxY - vbMinY;
 
   const up = bal.unrealisedPnl || 0;
   const sunny = up > 0.5, storm = up < -20;
-  const sunX = pcx + halfW - 16, sunY = vbMinY + 8;
+  const sunX = maxX - 6, sunY = vbMinY + 6;
   let weather = "";
   if (sunny) {
     weather = sprite([" YY ", "YYYY", "YYYY", " YY "], { Y: "#ffd24a" }, sunX, sunY);
@@ -456,7 +463,7 @@ function renderGarden(ov) {
   const scene =
     `<div class="garden-plot"><svg viewBox="${vbMinX.toFixed(0)} ${vbMinY.toFixed(0)} ${vbW.toFixed(0)} ${vbH.toFixed(0)}" class="garden-svg" shape-rendering="crispEdges" preserveAspectRatio="xMidYMax meet">` +
     `<defs><linearGradient id="gsky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${skyTop}"/><stop offset="1" stop-color="${skyBot}"/></linearGradient></defs>` +
-    `<rect x="${vbMinX}" y="${vbMinY}" width="${vbW}" height="${vbH}" fill="url(#gsky)"/>${weather}${platform}${soil}${decor}${plantSvg}</svg></div>`;
+    `<rect x="${vbMinX}" y="${vbMinY}" width="${vbW}" height="${vbH}" fill="url(#gsky)"/>${weather}${tiles}${propSvg}</svg></div>`;
 
   el.innerHTML = hud + scene + `<div id="garden-readout" class="garden-readout">${gardenReadoutHTML()}</div>`;
 }
