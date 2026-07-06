@@ -247,67 +247,70 @@ function foliage(roe) {
     : lerpColor("#9fae52", "#9c6b39", clamp(-roe / 25, 0, 1)); // желтеет → буреет
 }
 
-// SVG-тело растения (якорь 0,0 — точка почвы, вверх = минус y)
-function plantBody(p, m) {
-  const fol = foliage(m.roe);
-  const folD = lerpColor(fol, "#0b2a12", 0.3);
-  const stem = "#7a5c38", stemD = "#5f4227";
-  const sp = hashStr(p.symbol) % 6;
-  const bloom = m.roe > 2;
-  const fruitN = Math.round(m.tp * 3);
-  const petal = m.long ? "#ff8fa0" : "#ffd27a";
-  const berry = m.long ? "#ff5d6c" : "#ffc24a";
-  const leaf = (x, y, r, rot) =>
-    `<ellipse cx="${x}" cy="${y}" rx="${r}" ry="${r * 0.5}" fill="${fol}" transform="rotate(${rot} ${x} ${y})"/>`;
+// ── Пиксель-арт: спрайты рисуются сеткой «пикселей»-прямоугольников ──────────
+// px 1 = один пиксель; вся сцена в пиксель-единицах, SVG масштабируется
+// на всю ширину, shape-rendering=crispEdges → чёткие блоки без сглаживания.
+
+const PX = 1.05; // лёгкий нахлёст против швов между «пикселями»
+function sprite(rows, pal, ox, oy) {
   let s = "";
-  switch (sp) {
-    case 0: // росток
-      s += `<rect x="-1.2" y="-22" width="2.4" height="22" rx="1.2" fill="${stem}"/>`;
-      s += leaf(-6, -18, 8, 25) + leaf(6, -20, 9, -25);
-      if (bloom) s += `<circle cx="0" cy="-24" r="3.4" fill="${petal}"/>`;
-      break;
-    case 1: // тюльпан
-      s += `<rect x="-1.3" y="-30" width="2.6" height="30" rx="1.3" fill="${stem}"/>`;
-      s += leaf(-8, -13, 10, 18);
-      s += `<path d="M-7 -30 Q-8 -41 0 -43 Q8 -41 7 -30 Q0 -34 -7 -30 Z" fill="${bloom ? petal : fol}"/>`;
-      break;
-    case 2: // подсолнух
-      s += `<rect x="-1.6" y="-40" width="3.2" height="40" rx="1.6" fill="${stem}"/>`;
-      s += leaf(-9, -20, 12, 20) + leaf(9, -28, 12, -20);
-      s += `<g transform="translate(0,-44)">`;
-      for (let a = 0; a < 12; a++) s += `<ellipse cx="0" cy="-9" rx="3" ry="6" fill="#ffcf5d" transform="rotate(${a * 30})"/>`;
-      s += `<circle r="7" fill="#7a4a22"/></g>`;
-      break;
-    case 3: // ягодный куст
-      s += `<ellipse cx="0" cy="-14" rx="16" ry="14" fill="${fol}"/>`;
-      s += `<ellipse cx="-7" cy="-20" rx="9" ry="8" fill="${lerpColor(fol, "#ffffff", 0.1)}"/>`;
-      s += `<ellipse cx="8" cy="-18" rx="9" ry="8" fill="${folD}"/>`;
-      for (let k = 0; k < fruitN; k++) s += `<circle cx="${-8 + k * 8}" cy="${-10 - (k % 2) * 6}" r="2.7" fill="${berry}"/>`;
-      break;
-    case 4: // ёлочка
-      s += `<rect x="-2" y="-9" width="4" height="9" fill="${stemD}"/>`;
-      s += `<path d="M0 -46 L-13 -24 L13 -24 Z" fill="${fol}"/>`;
-      s += `<path d="M0 -36 L-16 -12 L16 -12 Z" fill="${folD}"/>`;
-      s += `<path d="M0 -26 L-19 -2 L19 -2 Z" fill="${fol}"/>`;
-      for (let k = 0; k < fruitN; k++) s += `<circle cx="${-8 + k * 8}" cy="-8" r="2.5" fill="${berry}"/>`;
-      break;
-    default: // гриб
-      s += `<path d="M-6 0 Q-7 -14 0 -15 Q7 -14 6 0 Z" fill="#efe6d0"/>`;
-      s += `<path d="M-16 -13 Q0 -30 16 -13 Q0 -20 -16 -13 Z" fill="${m.long ? "#e0564f" : "#d98a3a"}"/>`;
-      for (let k = 0; k < 3; k++) s += `<circle cx="${-8 + k * 8}" cy="-16" r="2" fill="#fff"/>`;
+  for (let y = 0; y < rows.length; y++) {
+    const row = rows[y];
+    for (let x = 0; x < row.length; x++) {
+      const ch = row[x];
+      if (ch === " ") continue;
+      const col = pal[ch];
+      if (!col) continue;
+      s += `<rect x="${ox + x}" y="${oy + y}" width="${PX}" height="${PX}" fill="${col}"/>`;
+    }
   }
   return s;
 }
 
-// изометрическая плитка грядки
-function tileSVG(X, Y, occ, TW, TH, D) {
-  const top = occ ? "#6fae54" : "#7ea862", topD = "#5d9247";
-  const sideL = "#4d7d3a", sideR = "#3f6a30";
-  let s = "";
-  s += `<polygon points="${X - TW / 2},${Y} ${X},${Y + TH / 2} ${X},${Y + TH / 2 + D} ${X - TW / 2},${Y + D}" fill="${sideL}"/>`;
-  s += `<polygon points="${X + TW / 2},${Y} ${X},${Y + TH / 2} ${X},${Y + TH / 2 + D} ${X + TW / 2},${Y + D}" fill="${sideR}"/>`;
-  s += `<polygon points="${X},${Y - TH / 2} ${X + TW / 2},${Y} ${X},${Y + TH / 2} ${X - TW / 2},${Y}" fill="${top}" stroke="${topD}" stroke-width="1"/>`;
-  if (occ) s += `<ellipse cx="${X}" cy="${Y}" rx="15" ry="6" fill="#6b4f34"/><ellipse cx="${X}" cy="${Y - 1}" rx="11" ry="4" fill="#7c5c3c"/>`;
+// силуэты растений (символы → цвета через палитру плода/листвы)
+const SPRITES = {
+  0: [ // дуб
+    "   lgggl   ", "  glGGGlg  ", " glGGlGGlg ", "glGGlllGGlg",
+    "glGGGGGGGlg", " glGGGGGlg ", "  glGGGlg  ", "   gGGGg   ",
+    "    TtT    ", "    TtT    ", "    TtT    "],
+  1: [ // тюльпан
+    " P P P ", " PpPpP ", " PPPPP ", "  PPP  ",
+    "   g   ", "  lgl  ", "   g   ", "   g   "],
+  2: [ // подсолнух
+    "   YYY   ", "  YyByY  ", " YyBBByY ", "  YyByY  ",
+    "   YYY   ", "    g    ", "  l g l  ", "    g    ", "    g    "],
+  3: [ // ягодный куст
+    "  ggggg  ", " glGGGlg ", "glGGlGGlg", "glGGGGGlg", " glGGGlg ", "  gGGGg  "],
+  4: [ // ёлочка
+    "    l    ", "   gGg   ", "   gGg   ", "  gGGGg  ", "  gGGGg  ",
+    " gGGGGGg ", "gGGGGGGGg", "   TtT   ", "   TtT   "],
+  5: [ // гриб
+    " MMMMM ", "MmwmwmM", "MMmmmMM", "  sss  ", "  sss  ", "  sss  "],
+};
+
+// SVG-тело растения (пиксель-спрайт, якорь 0,0 — точка почвы, вверх = −y)
+function plantBody(p, m) {
+  const base = foliage(m.roe);
+  const petal = m.long ? "#ff8fb0" : "#ffcf6a";
+  const berry = m.long ? "#ff5d6c" : "#ffbf3c";
+  const pal = {
+    G: lerpColor(base, "#0a2a12", 0.42), g: base, l: lerpColor(base, "#eafff0", 0.35),
+    T: "#7a5535", t: "#573b22",
+    P: petal, p: lerpColor(petal, "#ffffff", 0.4),
+    Y: "#f4c542", y: "#d79a25", B: "#6e4522",
+    r: berry, w: "#f4efe0",
+    m: m.long ? "#d8473f" : "#d98a3a", M: m.long ? "#a82f2a" : "#a8641f", s: "#efe6cf",
+  };
+  const sp = hashStr(p.symbol) % 6;
+  const rows = SPRITES[sp];
+  const Ws = rows[0].length, Hs = rows.length;
+  let s = sprite(rows, pal, -Math.floor(Ws / 2), -Hs);
+  // спелость: наливающиеся плоды в кроне
+  const fruitN = sp === 1 || sp === 5 ? 0 : Math.round(m.tp * 3);
+  for (let k = 0; k < fruitN; k++) {
+    const fx = -3 + k * 3, fy = -Hs + 2 + (k % 2);
+    s += `<rect x="${fx}" y="${fy}" width="${1.6}" height="${1.6}" fill="${berry}"/>`;
+  }
   return s;
 }
 
@@ -322,62 +325,122 @@ function gardenReadoutHTML() {
     `<div class="gr-sub">вход $${fmtPrice(p.entryPrice)} · марк $${fmtPrice(p.markPrice)} · до TP ${(m.tp * 100).toFixed(0)}% — ${stage}</div>`;
 }
 
+// пиксельная изо-платформа (грядка): верх-трава + слои земли/камня
+function drawPlatform(px, py, halfW, SH) {
+  const halfH = halfW / 2;
+  const grass = ["#7bbd5b", "#6fae54", "#66a24c"], grassEdge = "#88c96a";
+  const dirt = "#7a5636", dirtD = "#5f4227", stone = "#8d99a6", stoneD = "#6f7b88", mortar = "#586570";
+  let s = "";
+  // верхняя травяная плоскость — построчно, ступенчатый ромб
+  for (let dy = -halfH; dy <= halfH; dy++) {
+    const hx = Math.round(halfW * (1 - Math.abs(dy) / halfH));
+    if (hx <= 0) continue;
+    const y = Math.round(py + dy);
+    const shade = dy < -halfH * 0.4 ? grass[0] : dy > halfH * 0.4 ? grass[2] : grass[1];
+    s += `<rect x="${px - hx}" y="${y}" width="${2 * hx + PX}" height="${PX}" fill="${shade}"/>`;
+    if (Math.abs(dy) <= 1) s += `<rect x="${px - hx}" y="${y}" width="${2 * hx + PX}" height="${PX}" fill="${grassEdge}" opacity="0.4"/>`;
+  }
+  // травяная «крошка»-текстура
+  for (let i = 0; i < halfW; i++) {
+    const a = (i * 37) % (2 * halfW) - halfW, dy = ((i * 53) % halfH) - halfH / 2;
+    const hx = halfW * (1 - Math.abs(dy) / halfH);
+    if (Math.abs(a) < hx - 2) s += `<rect x="${Math.round(px + a)}" y="${Math.round(py + dy)}" width="${PX}" height="${PX}" fill="${grass[2]}" opacity="0.6"/>`;
+  }
+  // боковые грани — вертикальные полосы земли с каменной кладкой снизу
+  for (let x = -halfW; x <= halfW; x++) {
+    const bottomY = Math.round(py + (halfW - Math.abs(x)) / 2);
+    const col = px + x;
+    const left = x < 0;
+    s += `<rect x="${col}" y="${bottomY}" width="${PX}" height="${SH}" fill="${left ? dirtD : dirt}"/>`;
+    // горизонтальная прослойка земли
+    s += `<rect x="${col}" y="${bottomY + 2}" width="${PX}" height="${PX}" fill="${dirtD}" opacity="0.6"/>`;
+    // каменная кладка у основания
+    s += `<rect x="${col}" y="${bottomY + SH - 4}" width="${PX}" height="4" fill="${left ? stoneD : stone}"/>`;
+    if ((x + 100) % 4 === 0) s += `<rect x="${col}" y="${bottomY + SH - 4}" width="${PX}" height="4" fill="${mortar}"/>`;
+    s += `<rect x="${col}" y="${bottomY + SH - 2}" width="${PX}" height="${PX}" fill="${mortar}" opacity="0.7"/>`;
+  }
+  return s;
+}
+
+const DECOR = {
+  tuft: ["l l", "gGg"],
+  flower: [" P ", "PpP", " g ", "gGg"],
+};
+const DECOR_PAL = { l: "#9ad06f", g: "#5f9a45", G: "#4c7f38", P: "#ff8fb0", p: "#ffd0dd" };
+
 function renderGarden(ov) {
   lastGardenRender = Date.now();
   const el = $("garden");
   if (!el) return;
   const pos = (ov.positions || []).slice(0, 12);
   const bal = ov.balance || {};
-  const TW = 86, TH = 44, D = 9;
+  const TW = 30, TH = 15, SH = 12;
   const n = pos.length;
   const cols = n <= 1 ? 2 : n <= 6 ? 3 : 4;
   const rows = Math.max(2, Math.ceil(Math.max(n, cols) / cols));
-  const marginX = 24, topSpace = 96, bottomSpace = D + 22;
-  const originX = marginX + (rows - 1) * TW / 2;
-  const originY = topSpace;
-  const W = originX + (cols - 1) * TW / 2 + TW / 2 + marginX;
-  const H = originY + (cols - 1 + rows - 1) * TH / 2 + TH / 2 + bottomSpace;
-  const iso = (c, r) => ({ x: originX + (c - r) * TW / 2, y: originY + (c + r) * TH / 2 });
+  const iso = (c, r) => ({ x: (c - r) * TW / 2, y: (c + r) * TH / 2 });
 
   const cells = [];
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) cells.push({ c, r, idx: r * cols + c });
   cells.sort((a, b) => (a.c + a.r) - (b.c + b.r) || a.c - b.c);
 
-  let tiles = "";
+  // границы центров плиток → размер платформы
+  let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+  cells.forEach((cell) => {
+    const { x, y } = iso(cell.c, cell.r);
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+  });
+  const pcx = (minX + maxX) / 2, pcy = (minY + maxY) / 2;
+  const halfW = Math.round((maxX - minX) / 2 + TW * 0.9);
+  const platform = drawPlatform(pcx, pcy, halfW, SH);
+
+  // почвенные лунки под растениями + декор на пустых плитках
+  let soil = "", decor = "";
   const plants = [];
   cells.forEach((cell) => {
     const { x, y } = iso(cell.c, cell.r);
-    const occ = cell.idx < n;
-    tiles += tileSVG(x, y, occ, TW, TH, D);
-    if (occ) plants.push({ cell, x, y, p: pos[cell.idx], i: cell.idx });
+    if (cell.idx < n) {
+      soil += `<ellipse cx="${x}" cy="${y}" rx="7" ry="3" fill="#6b4f34"/><ellipse cx="${x}" cy="${y - 0.5}" rx="5" ry="2" fill="#7c5c3c"/>`;
+      plants.push({ cell, x, y, p: pos[cell.idx], i: cell.idx });
+    } else if ((hashStr("d" + cell.idx) % 3) !== 0) {
+      const d = (hashStr("f" + cell.idx) % 2) ? DECOR.flower : DECOR.tuft;
+      decor += `<g transform="translate(${x},${y})">${sprite(d, DECOR_PAL, -1, -d.length)}</g>`;
+    }
   });
   plants.sort((a, b) => (a.cell.c + a.cell.r) - (b.cell.c + b.cell.r));
 
   let plantSvg = "";
   plants.forEach((pl) => {
     const m = posMetrics(pl.p);
-    const droop = m.sl > 0.45 ? (m.sl - 0.45) * 16 * (m.long ? 1 : -1) : 0;
+    const droop = m.sl > 0.45 ? (m.sl - 0.45) * 14 * (m.long ? 1 : -1) : 0;
     const wilt = m.sl > 0.6 || m.roe < -18;
     const sway = (3.4 + (hashStr(pl.p.symbol) % 10) * 0.12).toFixed(2);
     const delay = ((hashStr(pl.p.symbol) % 20) * 0.15).toFixed(2);
-    const selRing = pl.p.symbol === gardenSelSym
-      ? `<ellipse cx="0" cy="2" rx="20" ry="8" fill="none" stroke="#ffe08a" stroke-width="2"/>` : "";
-    plantSvg += `<g class="garden-plant${pl.p.symbol === gardenSelSym ? " sel" : ""}" data-i="${pl.i}" transform="translate(${pl.x.toFixed(1)},${pl.y.toFixed(1)})">`;
-    plantSvg += selRing;
-    plantSvg += `<ellipse cx="0" cy="-14" rx="22" ry="30" fill="transparent"/>`; // клик-зона
-    plantSvg += `<g class="${wilt ? "" : "garden-sway"}" style="animation-duration:${sway}s;animation-delay:${delay}s" transform="rotate(${droop.toFixed(1)})" opacity="${wilt ? 0.72 : 1}">${plantBody(pl.p, m)}</g>`;
-    plantSvg += `<g transform="translate(12,-1)"><line x1="0" y1="0" x2="0" y2="-24" stroke="#5b4a34" stroke-width="1.4"/><path d="M0 -24 L9 -21.5 L0 -19 Z" fill="${m.long ? "#37b26a" : "#e0566a"}"/></g>`;
+    const sel = pl.p.symbol === gardenSelSym;
+    plantSvg += `<g class="garden-plant${sel ? " sel" : ""}" data-i="${pl.i}" transform="translate(${pl.x.toFixed(1)},${pl.y.toFixed(1)})">`;
+    if (sel) plantSvg += `<rect x="-9" y="-24" width="18" height="26" fill="none" stroke="#ffe08a" stroke-width="1"/>`;
+    plantSvg += `<rect x="-9" y="-24" width="18" height="26" fill="transparent"/>`; // клик-зона
+    plantSvg += `<g class="${wilt ? "" : "garden-sway"}" style="animation-duration:${sway}s;animation-delay:${delay}s" transform="rotate(${droop.toFixed(1)})" opacity="${wilt ? 0.7 : 1}">${plantBody(pl.p, m)}</g>`;
+    // пиксельный флажок направления
+    plantSvg += `<rect x="8" y="-13" width="${PX}" height="13" fill="#5b4a34"/><rect x="9" y="-13" width="4" height="3" fill="${m.long ? "#37b26a" : "#e0566a"}"/>`;
     plantSvg += `</g>`;
   });
 
+  // границы вьюпорта
+  const vbMinX = pcx - halfW - 2, vbW = 2 * halfW + 4;
+  const vbMinY = minY - 30, vbMaxY = pcy + halfW / 2 + SH + 3;
+  const vbH = vbMaxY - vbMinY;
+
   const up = bal.unrealisedPnl || 0;
   const sunny = up > 0.5, storm = up < -20;
+  const sunX = pcx + halfW - 16, sunY = vbMinY + 8;
   let weather = "";
   if (sunny) {
-    weather = `<circle cx="${W - 42}" cy="42" r="22" fill="#ffd873" opacity="0.25"/><circle cx="${W - 42}" cy="42" r="15" fill="#ffd873"/>`;
+    weather = sprite([" YY ", "YYYY", "YYYY", " YY "], { Y: "#ffd24a" }, sunX, sunY);
   } else {
-    weather = `<g fill="#cfd6dd"><ellipse cx="${W - 54}" cy="40" rx="18" ry="11"/><ellipse cx="${W - 38}" cy="44" rx="14" ry="9"/></g>`;
-    if (storm) for (let d = 0; d < 5; d++) weather += `<line class="garden-rain" x1="${W - 58 + d * 8}" y1="52" x2="${W - 60 + d * 8}" y2="61" stroke="#8fb8d8" stroke-width="1.6" style="animation-delay:${(d * 0.2).toFixed(1)}s"/>`;
+    weather = sprite(["  wwww  ", " wwwwww ", "wwwwwwww"], { w: "#dfe6ec" }, sunX - 4, sunY);
+    if (storm) for (let d = 0; d < 4; d++) weather += `<rect class="garden-rain" x="${sunX + d * 2}" y="${sunY + 4}" width="${PX}" height="3" fill="#8fb8d8" style="animation-delay:${(d * 0.2).toFixed(1)}s"/>`;
   }
 
   const harvest = lastStatsData ? lastStatsData.realizedPnl : null;
@@ -391,9 +454,9 @@ function renderGarden(ov) {
 
   const skyTop = sunny ? "#a6dcf0" : "#9fb4c4", skyBot = sunny ? "#dff0e6" : "#cdd8dc";
   const scene =
-    `<div class="garden-plot"><svg viewBox="0 0 ${W.toFixed(0)} ${H.toFixed(0)}" class="garden-svg" preserveAspectRatio="xMidYMax meet">` +
+    `<div class="garden-plot"><svg viewBox="${vbMinX.toFixed(0)} ${vbMinY.toFixed(0)} ${vbW.toFixed(0)} ${vbH.toFixed(0)}" class="garden-svg" shape-rendering="crispEdges" preserveAspectRatio="xMidYMax meet">` +
     `<defs><linearGradient id="gsky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${skyTop}"/><stop offset="1" stop-color="${skyBot}"/></linearGradient></defs>` +
-    `<rect x="0" y="0" width="${W}" height="${H}" fill="url(#gsky)"/>${weather}${tiles}${plantSvg}</svg></div>`;
+    `<rect x="${vbMinX}" y="${vbMinY}" width="${vbW}" height="${vbH}" fill="url(#gsky)"/>${weather}${platform}${soil}${decor}${plantSvg}</svg></div>`;
 
   el.innerHTML = hud + scene + `<div id="garden-readout" class="garden-readout">${gardenReadoutHTML()}</div>`;
 }
