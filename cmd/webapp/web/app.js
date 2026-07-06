@@ -253,67 +253,32 @@ function foliage(roe) {
 // px 1 = один пиксель; вся сцена в пиксель-единицах, SVG масштабируется
 // на всю ширину, shape-rendering=crispEdges → чёткие блоки без сглаживания.
 
-const PX = 1.05; // лёгкий нахлёст против швов между «пикселями»
-function sprite(rows, pal, ox, oy) {
-  let s = "";
-  for (let y = 0; y < rows.length; y++) {
-    const row = rows[y];
-    for (let x = 0; x < row.length; x++) {
-      const ch = row[x];
-      if (ch === " ") continue;
-      const col = pal[ch];
-      if (!col) continue;
-      s += `<rect x="${ox + x}" y="${oy + y}" width="${PX}" height="${PX}" fill="${col}"/>`;
-    }
-  }
-  return s;
-}
-
-// силуэты растений (символы → цвета через палитру плода/листвы)
-const SPRITES = {
-  0: [ // дуб
-    "   lgggl   ", "  glGGGlg  ", " glGGlGGlg ", "glGGlllGGlg",
-    "glGGGGGGGlg", " glGGGGGlg ", "  glGGGlg  ", "   gGGGg   ",
-    "    TtT    ", "    TtT    ", "    TtT    "],
-  1: [ // тюльпан
-    " P P P ", " PpPpP ", " PPPPP ", "  PPP  ",
-    "   g   ", "  lgl  ", "   g   ", "   g   "],
-  2: [ // подсолнух
-    "   YYY   ", "  YyByY  ", " YyBBByY ", "  YyByY  ",
-    "   YYY   ", "    g    ", "  l g l  ", "    g    ", "    g    "],
-  3: [ // ягодный куст
-    "  ggggg  ", " glGGGlg ", "glGGlGGlg", "glGGGGGlg", " glGGGlg ", "  gGGGg  "],
-  4: [ // ёлочка
-    "    l    ", "   gGg   ", "   gGg   ", "  gGGGg  ", "  gGGGg  ",
-    " gGGGGGg ", "gGGGGGGGg", "   TtT   ", "   TtT   "],
-  5: [ // гриб
-    " MMMMM ", "MmwmwmM", "MMmmmMM", "  sss  ", "  sss  ", "  sss  "],
+// ── Сад на CC0-ассетах (rubberduck / yughues, OpenGameArt) ──────────────────
+const GA = "assets/garden/";
+// метаданные спрайтов: файл, отношение h/w, масштаб к ширине плитки, якорь по Y
+const G_SPRITE = {
+  oak:     { f: "oak.png",      ar: 1,    sc: 1.8,  ay: 0.80 },
+  oak2:    { f: "oak2.png",     ar: 1,    sc: 1.8,  ay: 0.80 },
+  pine:    { f: "pine.png",     ar: 1,    sc: 1.8,  ay: 0.80 },
+  pine2:   { f: "pine2.png",    ar: 1,    sc: 1.7,  ay: 0.80 },
+  bush:    { f: "bush.png",     ar: 0.5,  sc: 1.4,  ay: 0.80 },
+  bush2:   { f: "bush2.png",    ar: 0.5,  sc: 1.2,  ay: 0.80 },
+  shrub:   { f: "shrub.png",    ar: 0.5,  sc: 1.3,  ay: 0.80 },
+  shrub2:  { f: "shrub2.png",   ar: 0.5,  sc: 1.3,  ay: 0.80 },
+  tropical:{ f: "tropical.png", ar: 0.5,  sc: 1.35, ay: 0.80 },
+  cactus:  { f: "cactus.png",   ar: 1,    sc: 1.15, ay: 0.82 },
+  palm:    { f: "palm.png",     ar: 0.5,  sc: 1.7,  ay: 0.80 },
+  grasses: { f: "grasses.png",  ar: 0.5,  sc: 1.0,  ay: 0.84 },
+  weed:    { f: "weed.png",     ar: 0.5,  sc: 0.9,  ay: 0.84 },
 };
+const SPECIES = ["oak", "pine", "bush", "shrub2", "tropical", "cactus"];
+const AMBIENTS = ["oak2", "pine2", "bush", "bush2", "shrub", "grasses", "weed", "grasses", "palm", "weed"];
 
-// SVG-тело растения (пиксель-спрайт, якорь 0,0 — точка почвы, вверх = −y)
-function plantBody(p, m) {
-  const base = foliage(m.roe);
-  const petal = m.long ? "#ff8fb0" : "#ffcf6a";
-  const berry = m.long ? "#ff5d6c" : "#ffbf3c";
-  const pal = {
-    G: lerpColor(base, "#0a2a12", 0.42), g: base, l: lerpColor(base, "#eafff0", 0.35),
-    T: "#7a5535", t: "#573b22",
-    P: petal, p: lerpColor(petal, "#ffffff", 0.4),
-    Y: "#f4c542", y: "#d79a25", B: "#6e4522",
-    r: berry, w: "#f4efe0",
-    m: m.long ? "#d8473f" : "#d98a3a", M: m.long ? "#a82f2a" : "#a8641f", s: "#efe6cf",
-  };
-  const sp = hashStr(p.symbol) % 6;
-  const rows = SPRITES[sp];
-  const Ws = rows[0].length, Hs = rows.length;
-  let s = sprite(rows, pal, -Math.floor(Ws / 2), -Hs);
-  // спелость: наливающиеся плоды в кроне
-  const fruitN = sp === 1 || sp === 5 ? 0 : Math.round(m.tp * 3);
-  for (let k = 0; k < fruitN; k++) {
-    const fx = -3 + k * 3, fy = -Hs + 2 + (k % 2);
-    s += `<rect x="${fx}" y="${fy}" width="${1.6}" height="${1.6}" fill="${berry}"/>`;
-  }
-  return s;
+// <image>-спрайт, привязанный низом к точке (0,0)
+function spriteImg(key, TW, style) {
+  const m = G_SPRITE[key];
+  const w = TW * m.sc, h = w * m.ar;
+  return `<image href="${GA}${m.f}" x="${(-w / 2).toFixed(1)}" y="${(-h * m.ay).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"${style ? ` style="${style}"` : ""}/>`;
 }
 
 function gardenReadoutHTML() {
@@ -327,72 +292,15 @@ function gardenReadoutHTML() {
     `<div class="gr-sub">вход $${fmtPrice(p.entryPrice)} · марк $${fmtPrice(p.markPrice)} · до TP ${(m.tp * 100).toFixed(0)}% — ${stage}</div>`;
 }
 
-// одна пиксельная изо-плитка травы с тонким краем (земля)
-function drawTile(X, Y, TW, TH, EH, alt) {
-  const top = alt ? "#6bae4c" : "#7cc05a";
-  const rim = lerpColor(top, "#2f4f22", 0.38);
-  const rimL = lerpColor(rim, "#000000", 0.18);
-  const dirt = "#caa25a", dirtD = "#a17a3c";
-  const hh = TH / 2;
-  let s = "";
-  for (let dy = -hh; dy <= hh; dy++) {
-    const hx = Math.round((TW / 2) * (1 - Math.abs(dy) / hh));
-    if (hx <= 0) continue;
-    s += `<rect x="${X - hx}" y="${Math.round(Y + dy)}" width="${2 * hx + PX}" height="${PX}" fill="${top}"/>`;
-  }
-  for (let x = -TW / 2; x <= TW / 2; x++) {
-    const by = Math.round(Y + hh * (1 - Math.abs(x) / (TW / 2)));
-    const col = X + x, left = x < 0;
-    s += `<rect x="${col}" y="${by}" width="${PX}" height="${EH}" fill="${left ? rimL : rim}"/>`;
-    s += `<rect x="${col}" y="${by + EH - 1}" width="${PX}" height="${PX + 0.5}" fill="${left ? dirtD : dirt}"/>`;
-  }
-  return s;
-}
-
-// пиксельная плитка воды (пруд) с бликами
-function drawWaterTile(X, Y, TW, TH, EH) {
-  const top = "#57b4d6", edge = "#3f7f9e", dirt = "#caa25a", dirtD = "#a17a3c";
-  const hh = TH / 2;
-  let s = "";
-  for (let dy = -hh; dy <= hh; dy++) {
-    const hx = Math.round((TW / 2) * (1 - Math.abs(dy) / hh));
-    if (hx <= 0) continue;
-    s += `<rect x="${X - hx}" y="${Math.round(Y + dy)}" width="${2 * hx + PX}" height="${PX}" fill="${top}"/>`;
-  }
-  s += `<rect class="garden-water" x="${X - 6}" y="${Y - 2}" width="5" height="${PX}" fill="#c3ecf6"/>`;
-  s += `<rect class="garden-water" x="${X + 2}" y="${Y + 1}" width="4" height="${PX}" fill="#c3ecf6" style="animation-delay:.9s"/>`;
-  for (let x = -TW / 2; x <= TW / 2; x++) {
-    const by = Math.round(Y + hh * (1 - Math.abs(x) / (TW / 2)));
-    const col = X + x, left = x < 0;
-    s += `<rect x="${col}" y="${by}" width="${PX}" height="${EH}" fill="${left ? lerpColor(edge, "#000000", 0.15) : edge}"/>`;
-    s += `<rect x="${col}" y="${by + EH - 1}" width="${PX}" height="${PX + 0.5}" fill="${left ? dirtD : dirt}"/>`;
-  }
-  return s;
-}
-
-// декоративная зелень на «пустых» плитках — фон для растений-позиций
-const AMB_PAL = {
-  G: "#3d8b41", g: "#57a552", l: "#6cb857", T: "#7a5535", t: "#573b22",
-  P: "#ff9ab8", p: "#ffd3e0", Y: "#f4c542", y: "#d79a25", B: "#6e4522",
-  r: "#e0564f", w: "#ffffff", m: "#d8473f", M: "#a82f2a", s: "#efe6cf",
-  c: "#e05a4f", C: "#b5372f",
-};
-const AMB = {
-  tuft: ["l l", "gGg"],
-  flower: [" P ", "PpP", " g ", "gGg"],
-  coral: [" c c c ", " cCcCc ", "cCcccCc", " CgGgC ", "  gGg  "],
-};
-
 function renderGarden(ov) {
   const el = $("garden");
   if (!el) return;
   if (gardenInteracting) return; // не пересобирать SVG посреди жеста
   lastGardenRender = Date.now();
-  const shadow = (rx) => `<ellipse cx="0" cy="1.5" rx="${rx}" ry="${(rx * 0.32).toFixed(1)}" fill="#243218" opacity="0.16"/>`;
   let bloom = ""; // слой «свечения» (bloom) — размывается фильтром, blend: screen
   const pos = (ov.positions || []).slice(0, 16);
   const bal = ov.balance || {};
-  const TW = 24, TH = 12, EH = 4;
+  const TW = 64, TH = 32;
   const n = pos.length;
   const G = Math.max(5, Math.min(6, Math.ceil(Math.sqrt(Math.max(1, n))) + 3));
   const iso = (c, r) => ({ x: (c - r) * TW / 2, y: (c + r) * TH / 2 });
@@ -401,10 +309,9 @@ function renderGarden(ov) {
   for (let r = 0; r < G; r++) for (let c = 0; c < G; c++) cells.push({ c, r });
   cells.sort((a, b) => (a.c + a.r) - (b.c + b.r) || a.c - b.c);
 
-  // пруд — блок 2×2 плиток
+  // пруд — блок 2×2 плиток (одно изображение воды)
   const water = new Set();
   [[1, 1], [2, 1], [1, 2], [2, 2]].forEach(([c, r]) => { if (c < G && r < G) water.add(c * 100 + r); });
-  if (water.size) { const pcw = iso(1.5, 1.5); bloom += `<ellipse cx="${pcw.x.toFixed(1)}" cy="${pcw.y.toFixed(1)}" rx="16" ry="8" fill="#bfe8fb"/>`; }
 
   // растения-позиции раскидываем по плиткам псевдослучайно (мимо пруда)
   const shuffled = cells.filter((c) => !water.has(c.c * 100 + c.r))
@@ -419,14 +326,19 @@ function renderGarden(ov) {
     minY = Math.min(minY, y); maxY = Math.max(maxY, y);
   });
 
-  // плитки — задними рядами вперёд (шахматная раскраска)
+  // плитки травы (шахматная раскраска через фильтр) + пруд
   let tiles = "";
   cells.forEach((cell) => {
+    if (water.has(cell.c * 100 + cell.r)) return;
     const { x, y } = iso(cell.c, cell.r);
-    tiles += water.has(cell.c * 100 + cell.r)
-      ? drawWaterTile(x, y, TW, TH, EH)
-      : drawTile(x, y, TW, TH, EH, (cell.c + cell.r) % 2);
+    const alt = (cell.c + cell.r) % 2 ? " garden-tile-b" : "";
+    tiles += `<image class="garden-tile${alt}" href="${GA}tile_grass.png" x="${(x - TW / 2).toFixed(1)}" y="${(y - TH / 2).toFixed(1)}" width="${TW}" height="${TH}"/>`;
   });
+  if (water.size) {
+    const pc = iso(1.5, 1.5);
+    tiles += `<image href="${GA}tile_water.png" x="${(pc.x - TW).toFixed(1)}" y="${(pc.y - TH).toFixed(1)}" width="${2 * TW}" height="${2 * TH}"/>`;
+    bloom += `<ellipse cx="${(pc.x - 6).toFixed(1)}" cy="${(pc.y - 3).toFixed(1)}" rx="10" ry="4" fill="#dff4fb"/>`;
+  }
 
   // пропсы: растения-позиции (кликабельны) + фоновая зелень, сорт по глубине
   const props = [];
@@ -438,56 +350,50 @@ function renderGarden(ov) {
     if (posMap.has(key)) {
       const i = posMap.get(key);
       const p = pos[i], m = posMetrics(p);
-      if (m.tp > 0.4) bloom += `<circle cx="${x.toFixed(1)}" cy="${(y - 12).toFixed(1)}" r="3" fill="${m.long ? "#ff8a97" : "#ffd77a"}"/>`;
-      const droop = m.sl > 0.45 ? (m.sl - 0.45) * 14 * (m.long ? 1 : -1) : 0;
-      const wilt = m.sl > 0.6 || m.roe < -18;
-      const sway = (3.4 + (hashStr(p.symbol) % 10) * 0.12).toFixed(2);
-      const delay = ((hashStr(p.symbol) % 20) * 0.15).toFixed(2);
+      const sp = SPECIES[hashStr(p.symbol) % SPECIES.length];
+      const relTop = -TW * G_SPRITE[sp].sc * G_SPRITE[sp].ar * G_SPRITE[sp].ay; // верх спрайта относительно якоря
+      if (m.tp > 0.4) bloom += `<circle cx="${x.toFixed(1)}" cy="${(y + relTop + 10).toFixed(1)}" r="5" fill="${m.long ? "#ff9aa6" : "#ffe08a"}"/>`;
+      // здоровье → насыщенность/яркость спрайта; сильная просадка — увядание
+      const sat = m.roe >= 0 ? 1 : clamp(1 + m.roe / 28, 0.25, 1);
+      const br = m.roe >= 0 ? 1 : clamp(1 + m.roe / 70, 0.72, 1);
+      const wilt = m.sl > 0.6;
+      const filt = `filter:saturate(${sat.toFixed(2)}) brightness(${br.toFixed(2)});${wilt ? "opacity:.82;" : ""}`;
       const sel = p.symbol === gardenSelSym;
       let g = `<g class="garden-plant${sel ? " sel" : ""}" data-i="${i}" transform="translate(${x.toFixed(1)},${y.toFixed(1)})">`;
-      g += shadow(6);
-      g += `<rect x="-5" y="-2" width="10" height="3" fill="#6b4f34"/><rect x="-6" y="-1" width="12" height="2" fill="#6b4f34"/>`; // лунка
-      if (sel) g += `<rect x="-9" y="-24" width="18" height="26" fill="none" stroke="#ffe08a" stroke-width="1"/>`;
-      g += `<rect x="-9" y="-24" width="18" height="26" fill="transparent"/>`;
-      g += `<g class="${wilt ? "" : "garden-sway"}" style="animation-duration:${sway}s;animation-delay:${delay}s" transform="rotate(${droop.toFixed(1)})" opacity="${wilt ? 0.7 : 1}">${plantBody(p, m)}</g>`;
-      g += `<rect x="8" y="-13" width="${PX}" height="13" fill="#5b4a34"/><rect x="9" y="-13" width="4" height="3" fill="${m.long ? "#37b26a" : "#e0566a"}"/></g>`;
+      if (sel) g += `<ellipse cx="0" cy="0" rx="${(TW * 0.5).toFixed(0)}" ry="${(TH * 0.5).toFixed(0)}" fill="none" stroke="#ffe08a" stroke-width="2"/>`;
+      g += spriteImg(sp, TW, filt);
+      // флажок направления
+      const fx = TW * 0.26, ft = relTop * 0.62; // флажок у верхушки
+      g += `<line x1="${fx.toFixed(1)}" y1="${ft.toFixed(1)}" x2="${fx.toFixed(1)}" y2="${(ft - 16).toFixed(1)}" stroke="#4a3c2a" stroke-width="1.8"/>` +
+        `<path d="M${fx.toFixed(1)} ${(ft - 16).toFixed(1)} l10 3 l-10 3 z" fill="${m.long ? "#37b26a" : "#e0566a"}"/>`;
+      g += `</g>`;
       props.push({ depth, y, svg: g });
     } else {
       const h = hashStr("a" + cell.c + "_" + cell.r) % 10;
-      let rows = null;
-      if (h < 3) rows = null;              // пустая трава
-      else if (h < 5) rows = SPRITES[4];   // ёлочка
-      else if (h < 6) rows = SPRITES[0];   // дуб
-      else if (h < 8) rows = AMB.flower;
-      else if (h < 9) rows = AMB.coral;
-      else rows = AMB.tuft;
-      if (rows) {
-        if (rows === AMB.flower) bloom += `<circle cx="${x.toFixed(1)}" cy="${(y - 4).toFixed(1)}" r="3" fill="#ffb9d0"/>`;
-        else if (rows === AMB.coral) bloom += `<circle cx="${x.toFixed(1)}" cy="${(y - 5).toFixed(1)}" r="3.5" fill="#ff7a6a"/>`;
-        const svg = `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)})">${shadow(rows[0].length * 0.42)}${sprite(rows, AMB_PAL, -Math.floor(rows[0].length / 2), -rows.length)}</g>`;
-        props.push({ depth, y, svg });
-      }
+      if (h < 2) return; // пустая трава
+      const key2 = AMBIENTS[hashStr("k" + cell.c + "_" + cell.r) % AMBIENTS.length];
+      props.push({ depth, y, svg: `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)})">${spriteImg(key2, TW)}</g>` });
     }
   });
   props.sort((a, b) => a.depth - b.depth || a.y - b.y);
   const propSvg = props.map((p) => p.svg).join("");
 
-  // границы вьюпорта
-  const pad = TW / 2 + 2;
+  // границы вьюпорта (сверху — место под высокие деревья)
+  const pad = TW * 0.7;
   const vbMinX = minX - pad, vbW = (maxX - minX) + 2 * pad;
-  const vbMinY = minY - 26, vbMaxY = maxY + TH / 2 + EH + 3;
+  const vbMinY = minY - TW * 1.5, vbMaxY = maxY + TH + TW * 0.4;
   const vbH = vbMaxY - vbMinY;
 
   const up = bal.unrealisedPnl || 0;
   const sunny = up > 0.5, storm = up < -20;
-  const sunX = maxX - 6, sunY = vbMinY + 6;
+  const sunX = maxX - TW * 0.2, sunY = vbMinY + TW * 0.35;
   let weather = "";
   if (sunny) {
-    weather = sprite([" YY ", "YYYY", "YYYY", " YY "], { Y: "#ffd24a" }, sunX, sunY);
-    bloom += `<circle cx="${sunX + 2}" cy="${sunY + 2}" r="10" fill="#fff2b0"/><circle cx="${sunX + 2}" cy="${sunY + 2}" r="26" fill="#ffe79a" opacity="0.5"/>`;
+    weather = `<circle cx="${sunX.toFixed(1)}" cy="${sunY.toFixed(1)}" r="13" fill="#ffd24a"/>`;
+    bloom += `<circle cx="${sunX.toFixed(1)}" cy="${sunY.toFixed(1)}" r="16" fill="#fff2b0"/><circle cx="${sunX.toFixed(1)}" cy="${sunY.toFixed(1)}" r="40" fill="#ffe79a" opacity="0.5"/>`;
   } else {
-    weather = sprite(["  wwww  ", " wwwwww ", "wwwwwwww"], { w: "#dfe6ec" }, sunX - 4, sunY);
-    if (storm) for (let d = 0; d < 4; d++) weather += `<rect class="garden-rain" x="${sunX + d * 2}" y="${sunY + 4}" width="${PX}" height="3" fill="#8fb8d8" style="animation-delay:${(d * 0.2).toFixed(1)}s"/>`;
+    weather = `<g fill="#e6ecf1"><ellipse cx="${(sunX - 8).toFixed(1)}" cy="${sunY.toFixed(1)}" rx="20" ry="12"/><ellipse cx="${(sunX + 8).toFixed(1)}" cy="${(sunY + 4).toFixed(1)}" rx="15" ry="10"/></g>`;
+    if (storm) for (let d = 0; d < 4; d++) weather += `<line class="garden-rain" x1="${(sunX - 12 + d * 8).toFixed(1)}" y1="${(sunY + 12).toFixed(1)}" x2="${(sunX - 14 + d * 8).toFixed(1)}" y2="${(sunY + 20).toFixed(1)}" stroke="#8fb8d8" stroke-width="2" style="animation-delay:${(d * 0.2).toFixed(1)}s"/>`;
   }
 
   const harvest = lastStatsData ? lastStatsData.realizedPnl : null;
@@ -501,13 +407,15 @@ function renderGarden(ov) {
 
   const skyTop = sunny ? "#a6dcf0" : "#9fb4c4", skyBot = sunny ? "#dff0e6" : "#cdd8dc";
   const scene =
-    `<div class="garden-plot"><svg viewBox="${vbMinX.toFixed(0)} ${vbMinY.toFixed(0)} ${vbW.toFixed(0)} ${vbH.toFixed(0)}" class="garden-svg" shape-rendering="crispEdges" preserveAspectRatio="xMidYMid meet">` +
+    `<div class="garden-plot"><svg viewBox="${vbMinX.toFixed(0)} ${vbMinY.toFixed(0)} ${vbW.toFixed(0)} ${vbH.toFixed(0)}" class="garden-svg" preserveAspectRatio="xMidYMid meet">` +
     `<defs><linearGradient id="gsky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${skyTop}"/><stop offset="1" stop-color="${skyBot}"/></linearGradient>` +
-    `<filter id="gbloom" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="2.6"/></filter></defs>` +
+    `<filter id="gbloom" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="3"/></filter></defs>` +
     `<rect x="${vbMinX}" y="${vbMinY}" width="${vbW}" height="${vbH}" fill="url(#gsky)"/>${weather}${tiles}${propSvg}` +
     `<g class="garden-bloom" filter="url(#gbloom)">${bloom}</g></svg></div>`;
 
-  el.innerHTML = hud + scene + `<div id="garden-readout" class="garden-readout">${gardenReadoutHTML()}</div>`;
+  el.innerHTML = hud + scene +
+    `<div id="garden-readout" class="garden-readout">${gardenReadoutHTML()}</div>` +
+    `<div class="garden-credit">Ассеты: rubberduck / yughues · OpenGameArt · CC0</div>`;
   applyGardenTransform();
 }
 

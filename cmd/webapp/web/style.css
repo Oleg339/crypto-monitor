@@ -761,13 +761,17 @@ body.garden #garden { display: block; }
   width: 100%; height: 100%; display: block;
   transform-origin: center center;
   will-change: transform;
-  image-rendering: pixelated; image-rendering: crisp-edges;
 }
-.garden-water { animation: garden-water 2.6s ease-in-out infinite; }
-@keyframes garden-water { 50% { opacity: 0.4; } }
+.garden-tile-b { filter: brightness(0.93) saturate(0.96); }
+.garden-plant { cursor: pointer; }
 /* эмуляция bloom-шейдера: размытый слой света в режиме screen */
 .garden-bloom { mix-blend-mode: screen; opacity: 0.85; pointer-events: none; animation: garden-glow 3.4s ease-in-out infinite; }
-@keyframes garden-glow { 50% { opacity: 0.62; } }
+@keyframes garden-glow { 50% { opacity: 0.6; } }
+.garden-credit {
+  margin-top: 8px; text-align: center;
+  font-size: 10px; color: var(--ink-3);
+  font-family: var(--ff-mono); letter-spacing: 0.2px;
+}
 .garden-plant { cursor: pointer; }
 .garden-sway { transform-box: fill-box; transform-origin: bottom center; animation: garden-sway 4s ease-in-out infinite; }
 @keyframes garden-sway { 0%, 100% { transform: rotate(-1.6deg); } 50% { transform: rotate(1.6deg); } }
