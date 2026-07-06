@@ -155,6 +155,7 @@ body {
 }
 .sw-obsidian { background: linear-gradient(135deg, #202125 55%, #8b80cc 55%); }
 .sw-neo      { background: radial-gradient(circle at 32% 30%, #3d4150, #191b21 72%); }
+.sw-garden   { background: linear-gradient(160deg, #a6dcf0 42%, #6fae54 42%); }
 .theme-opt .check { margin-left: auto; visibility: hidden; color: var(--accent); }
 .theme-opt.active .check { visibility: visible; }
 
@@ -699,6 +700,76 @@ body.neo #theme-menu {
 body.neo .theme-opt.active { background: var(--panel-2); }
 
 body.neo .error { background: var(--bg); box-shadow: var(--shadow-out); border-color: transparent; }
+
+/* ════════════════════════════════════════════════════════════════════════
+   ТЕМА «САД» — изометрическая грядка вместо карточек обзора.
+   Хром остаётся тёмным (как obsidian), сама сцена — светлый «террариум».
+   Растения = позиции; логика во внешнем renderGarden() (app.js).
+   ════════════════════════════════════════════════════════════════════════ */
+body.garden { --accent: #4cae79; }
+
+/* в саду прячем обычные блоки обзора, показываем только сцену */
+#garden { display: none; }
+body.garden #overview > *:not(#garden) { display: none !important; }
+body.garden #garden { display: block; }
+
+.garden-hud {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.garden-hud .gh {
+  background: var(--panel);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius);
+  padding: 9px 6px;
+  text-align: center;
+}
+.garden-hud .gh-l {
+  display: block;
+  font-size: 10px; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.6px;
+}
+.garden-hud .gh-v {
+  display: block; margin-top: 3px;
+  font-family: var(--ff-mono);
+  font-size: 15px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.garden-plot {
+  border: 1px solid var(--hair);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #cdd8dc;
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.12);
+}
+.garden-svg { width: 100%; height: auto; display: block; }
+.garden-plant { cursor: pointer; }
+.garden-sway { transform-box: fill-box; transform-origin: bottom center; animation: garden-sway 4s ease-in-out infinite; }
+@keyframes garden-sway { 0%, 100% { transform: rotate(-1.6deg); } 50% { transform: rotate(1.6deg); } }
+.garden-rain { animation: garden-rain 0.7s linear infinite; }
+@keyframes garden-rain { from { opacity: 0.8; transform: translateY(-4px); } to { opacity: 0; transform: translateY(10px); } }
+
+.garden-readout {
+  margin-top: 10px;
+  background: var(--panel);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+  min-height: 44px;
+  font-size: 13px;
+}
+.garden-readout .gr-hint { color: var(--ink-3); }
+.garden-readout .gr-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-weight: 600; }
+.garden-readout .gr-row b { font-size: 15px; }
+.garden-readout .gr-pnl { margin-left: auto; font-family: var(--ff-mono); font-size: 12.5px; }
+.garden-readout .gr-sub {
+  margin-top: 5px; color: var(--ink-3);
+  font-family: var(--ff-mono); font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }

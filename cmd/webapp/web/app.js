@@ -7,6 +7,7 @@ tg.expand();
 const THEMES = {
   obsidian: { bg: "#07080b" },
   neo:      { bg: "#1a1c22" },
+  garden:   { bg: "#0b0f0c" }, // тёмный хром, сама сцена сада — светлая внутри
 };
 let theme = localStorage.getItem("theme");
 if (!THEMES[theme]) theme = "obsidian";
@@ -23,12 +24,15 @@ function applyTgColors() {
 
 function applyTheme() {
   document.body.classList.toggle("neo", theme === "neo");
+  document.body.classList.toggle("garden", theme === "garden");
   document.querySelectorAll(".theme-opt").forEach((b) =>
     b.classList.toggle("active", b.dataset.theme === theme));
   applyTgColors();
   // ширины элементов зависят от шрифта темы
   moveChipGlider();
   moveTabGlider();
+  // сад заменяет обзор — перерисуем текущие данные под новую тему
+  if (lastOv) renderOverview(lastOv);
 }
 
 // В полноэкранном режиме контент уходит под статус-бар и кнопки Telegram.
@@ -127,6 +131,11 @@ let lastEquityVal = null; // для подсветки изменения equity
 function renderOverview(ov) {
   lastOv = ov;
   lastZenRender = Date.now();
+  if (theme === "garden") {
+    renderGarden(ov);
+    $("updated-text").textContent = "Обновлено " + new Date(ov.updatedAt).toLocaleTimeString("ru-RU");
+    return;
+  }
   if (zen) {
     renderHeroZen(ov);
   } else {
@@ -186,6 +195,207 @@ function renderHeroZen(ov) {
       <div><div class="lbl">Открытых позиций</div><div class="val">${ov.positions.length}</div></div>
       <div><div class="lbl">Данные</div><div class="val">${new Date(ov.updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</div></div>
     </div>`;
+}
+
+// ══ Сад ═══════════════════════════════════════════════════════════════════════
+// Тема-игра: изометрическая грядка, каждая открытая позиция — растение.
+//   вид культуры  — детерминированно по тикеру
+//   спелость      — прогресс цены к TP → наливающийся плод
+//   здоровье      — ROE: в плюсе пышное/цветёт, в минусе вянет/буреет
+//   стресс        — прогресс к SL → наклон/увядание
+//   флажок        — направление: зелёный ▲ long / красный ▼ short
+//   погода сцены  — общий нереализ. PnL: солнце / облака / дождь
+//   урожай (HUD)  — реализованный PnL
+
+let lastGardenRender = 0;
+const GARDEN_RENDER_EVERY = 4000;
+let gardenSelSym = null;
+
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function hashStr(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+function lerpColor(a, b, t) {
+  t = clamp(t, 0, 1);
+  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
+  return "#" + pa.map((v, i) => Math.round(v + (pb[i] - v) * t).toString(16).padStart(2, "0")).join("");
+}
+
+// метрики позиции для «садовой» логики
+function posMetrics(p) {
+  const long = isLong(p.side);
+  const margin = p.leverage > 0 ? (p.size * p.entryPrice) / p.leverage : 0;
+  const roe = margin > 0 ? (p.unrealisedPnl / margin) * 100 : 0;
+  let tp = 0, sl = 0;
+  if (p.takeProfit > 0 && p.entryPrice > 0) {
+    const d = long ? p.takeProfit - p.entryPrice : p.entryPrice - p.takeProfit;
+    if (d > 0) tp = clamp((long ? p.markPrice - p.entryPrice : p.entryPrice - p.markPrice) / d, 0, 1);
+  }
+  if (p.stopLoss > 0 && p.entryPrice > 0) {
+    const d = long ? p.entryPrice - p.stopLoss : p.stopLoss - p.entryPrice;
+    if (d > 0) sl = clamp((long ? p.entryPrice - p.markPrice : p.markPrice - p.entryPrice) / d, 0, 1);
+  }
+  return { long, margin, roe, tp, sl, value: p.size * p.markPrice };
+}
+
+function foliage(roe) {
+  return roe >= 0
+    ? lerpColor("#6cbf5f", "#2f8f43", clamp(roe / 25, 0, 1))   // мягкая → сочная зелень
+    : lerpColor("#9fae52", "#9c6b39", clamp(-roe / 25, 0, 1)); // желтеет → буреет
+}
+
+// SVG-тело растения (якорь 0,0 — точка почвы, вверх = минус y)
+function plantBody(p, m) {
+  const fol = foliage(m.roe);
+  const folD = lerpColor(fol, "#0b2a12", 0.3);
+  const stem = "#7a5c38", stemD = "#5f4227";
+  const sp = hashStr(p.symbol) % 6;
+  const bloom = m.roe > 2;
+  const fruitN = Math.round(m.tp * 3);
+  const petal = m.long ? "#ff8fa0" : "#ffd27a";
+  const berry = m.long ? "#ff5d6c" : "#ffc24a";
+  const leaf = (x, y, r, rot) =>
+    `<ellipse cx="${x}" cy="${y}" rx="${r}" ry="${r * 0.5}" fill="${fol}" transform="rotate(${rot} ${x} ${y})"/>`;
+  let s = "";
+  switch (sp) {
+    case 0: // росток
+      s += `<rect x="-1.2" y="-22" width="2.4" height="22" rx="1.2" fill="${stem}"/>`;
+      s += leaf(-6, -18, 8, 25) + leaf(6, -20, 9, -25);
+      if (bloom) s += `<circle cx="0" cy="-24" r="3.4" fill="${petal}"/>`;
+      break;
+    case 1: // тюльпан
+      s += `<rect x="-1.3" y="-30" width="2.6" height="30" rx="1.3" fill="${stem}"/>`;
+      s += leaf(-8, -13, 10, 18);
+      s += `<path d="M-7 -30 Q-8 -41 0 -43 Q8 -41 7 -30 Q0 -34 -7 -30 Z" fill="${bloom ? petal : fol}"/>`;
+      break;
+    case 2: // подсолнух
+      s += `<rect x="-1.6" y="-40" width="3.2" height="40" rx="1.6" fill="${stem}"/>`;
+      s += leaf(-9, -20, 12, 20) + leaf(9, -28, 12, -20);
+      s += `<g transform="translate(0,-44)">`;
+      for (let a = 0; a < 12; a++) s += `<ellipse cx="0" cy="-9" rx="3" ry="6" fill="#ffcf5d" transform="rotate(${a * 30})"/>`;
+      s += `<circle r="7" fill="#7a4a22"/></g>`;
+      break;
+    case 3: // ягодный куст
+      s += `<ellipse cx="0" cy="-14" rx="16" ry="14" fill="${fol}"/>`;
+      s += `<ellipse cx="-7" cy="-20" rx="9" ry="8" fill="${lerpColor(fol, "#ffffff", 0.1)}"/>`;
+      s += `<ellipse cx="8" cy="-18" rx="9" ry="8" fill="${folD}"/>`;
+      for (let k = 0; k < fruitN; k++) s += `<circle cx="${-8 + k * 8}" cy="${-10 - (k % 2) * 6}" r="2.7" fill="${berry}"/>`;
+      break;
+    case 4: // ёлочка
+      s += `<rect x="-2" y="-9" width="4" height="9" fill="${stemD}"/>`;
+      s += `<path d="M0 -46 L-13 -24 L13 -24 Z" fill="${fol}"/>`;
+      s += `<path d="M0 -36 L-16 -12 L16 -12 Z" fill="${folD}"/>`;
+      s += `<path d="M0 -26 L-19 -2 L19 -2 Z" fill="${fol}"/>`;
+      for (let k = 0; k < fruitN; k++) s += `<circle cx="${-8 + k * 8}" cy="-8" r="2.5" fill="${berry}"/>`;
+      break;
+    default: // гриб
+      s += `<path d="M-6 0 Q-7 -14 0 -15 Q7 -14 6 0 Z" fill="#efe6d0"/>`;
+      s += `<path d="M-16 -13 Q0 -30 16 -13 Q0 -20 -16 -13 Z" fill="${m.long ? "#e0564f" : "#d98a3a"}"/>`;
+      for (let k = 0; k < 3; k++) s += `<circle cx="${-8 + k * 8}" cy="-16" r="2" fill="#fff"/>`;
+  }
+  return s;
+}
+
+// изометрическая плитка грядки
+function tileSVG(X, Y, occ, TW, TH, D) {
+  const top = occ ? "#6fae54" : "#7ea862", topD = "#5d9247";
+  const sideL = "#4d7d3a", sideR = "#3f6a30";
+  let s = "";
+  s += `<polygon points="${X - TW / 2},${Y} ${X},${Y + TH / 2} ${X},${Y + TH / 2 + D} ${X - TW / 2},${Y + D}" fill="${sideL}"/>`;
+  s += `<polygon points="${X + TW / 2},${Y} ${X},${Y + TH / 2} ${X},${Y + TH / 2 + D} ${X + TW / 2},${Y + D}" fill="${sideR}"/>`;
+  s += `<polygon points="${X},${Y - TH / 2} ${X + TW / 2},${Y} ${X},${Y + TH / 2} ${X - TW / 2},${Y}" fill="${top}" stroke="${topD}" stroke-width="1"/>`;
+  if (occ) s += `<ellipse cx="${X}" cy="${Y}" rx="15" ry="6" fill="#6b4f34"/><ellipse cx="${X}" cy="${Y - 1}" rx="11" ry="4" fill="#7c5c3c"/>`;
+  return s;
+}
+
+function gardenReadoutHTML() {
+  const pos = lastOv ? lastOv.positions || [] : [];
+  const p = pos.find((x) => x.symbol === gardenSelSym);
+  if (!p) return `<span class="gr-hint">🌿 Нажми на растение, чтобы увидеть позицию</span>`;
+  const m = posMetrics(p);
+  const stage = m.tp > 0.66 ? "почти спелое" : m.tp > 0.33 ? "наливается" : "растёт";
+  return `<div class="gr-row"><b>${p.symbol}</b>${dirBadge(p.side)}<span class="badge">${fmt(p.leverage, 0)}x</span>` +
+    `<span class="gr-pnl">${pnlSpan(p.unrealisedPnl)} · ROE ${pnlSpan(m.roe, "%", 1)}</span></div>` +
+    `<div class="gr-sub">вход $${fmtPrice(p.entryPrice)} · марк $${fmtPrice(p.markPrice)} · до TP ${(m.tp * 100).toFixed(0)}% — ${stage}</div>`;
+}
+
+function renderGarden(ov) {
+  lastGardenRender = Date.now();
+  const el = $("garden");
+  if (!el) return;
+  const pos = (ov.positions || []).slice(0, 12);
+  const bal = ov.balance || {};
+  const TW = 86, TH = 44, D = 9;
+  const n = pos.length;
+  const cols = n <= 1 ? 2 : n <= 6 ? 3 : 4;
+  const rows = Math.max(2, Math.ceil(Math.max(n, cols) / cols));
+  const marginX = 24, topSpace = 96, bottomSpace = D + 22;
+  const originX = marginX + (rows - 1) * TW / 2;
+  const originY = topSpace;
+  const W = originX + (cols - 1) * TW / 2 + TW / 2 + marginX;
+  const H = originY + (cols - 1 + rows - 1) * TH / 2 + TH / 2 + bottomSpace;
+  const iso = (c, r) => ({ x: originX + (c - r) * TW / 2, y: originY + (c + r) * TH / 2 });
+
+  const cells = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) cells.push({ c, r, idx: r * cols + c });
+  cells.sort((a, b) => (a.c + a.r) - (b.c + b.r) || a.c - b.c);
+
+  let tiles = "";
+  const plants = [];
+  cells.forEach((cell) => {
+    const { x, y } = iso(cell.c, cell.r);
+    const occ = cell.idx < n;
+    tiles += tileSVG(x, y, occ, TW, TH, D);
+    if (occ) plants.push({ cell, x, y, p: pos[cell.idx], i: cell.idx });
+  });
+  plants.sort((a, b) => (a.cell.c + a.cell.r) - (b.cell.c + b.cell.r));
+
+  let plantSvg = "";
+  plants.forEach((pl) => {
+    const m = posMetrics(pl.p);
+    const droop = m.sl > 0.45 ? (m.sl - 0.45) * 16 * (m.long ? 1 : -1) : 0;
+    const wilt = m.sl > 0.6 || m.roe < -18;
+    const sway = (3.4 + (hashStr(pl.p.symbol) % 10) * 0.12).toFixed(2);
+    const delay = ((hashStr(pl.p.symbol) % 20) * 0.15).toFixed(2);
+    const selRing = pl.p.symbol === gardenSelSym
+      ? `<ellipse cx="0" cy="2" rx="20" ry="8" fill="none" stroke="#ffe08a" stroke-width="2"/>` : "";
+    plantSvg += `<g class="garden-plant${pl.p.symbol === gardenSelSym ? " sel" : ""}" data-i="${pl.i}" transform="translate(${pl.x.toFixed(1)},${pl.y.toFixed(1)})">`;
+    plantSvg += selRing;
+    plantSvg += `<ellipse cx="0" cy="-14" rx="22" ry="30" fill="transparent"/>`; // клик-зона
+    plantSvg += `<g class="${wilt ? "" : "garden-sway"}" style="animation-duration:${sway}s;animation-delay:${delay}s" transform="rotate(${droop.toFixed(1)})" opacity="${wilt ? 0.72 : 1}">${plantBody(pl.p, m)}</g>`;
+    plantSvg += `<g transform="translate(12,-1)"><line x1="0" y1="0" x2="0" y2="-24" stroke="#5b4a34" stroke-width="1.4"/><path d="M0 -24 L9 -21.5 L0 -19 Z" fill="${m.long ? "#37b26a" : "#e0566a"}"/></g>`;
+    plantSvg += `</g>`;
+  });
+
+  const up = bal.unrealisedPnl || 0;
+  const sunny = up > 0.5, storm = up < -20;
+  let weather = "";
+  if (sunny) {
+    weather = `<circle cx="${W - 42}" cy="42" r="22" fill="#ffd873" opacity="0.25"/><circle cx="${W - 42}" cy="42" r="15" fill="#ffd873"/>`;
+  } else {
+    weather = `<g fill="#cfd6dd"><ellipse cx="${W - 54}" cy="40" rx="18" ry="11"/><ellipse cx="${W - 38}" cy="44" rx="14" ry="9"/></g>`;
+    if (storm) for (let d = 0; d < 5; d++) weather += `<line class="garden-rain" x1="${W - 58 + d * 8}" y1="52" x2="${W - 60 + d * 8}" y2="61" stroke="#8fb8d8" stroke-width="1.6" style="animation-delay:${(d * 0.2).toFixed(1)}s"/>`;
+  }
+
+  const harvest = lastStatsData ? lastStatsData.realizedPnl : null;
+  const weatherLabel = sunny ? "☀ ясно" : storm ? "🌧 буря" : "☁ облачно";
+  const hud =
+    `<div class="garden-hud">` +
+    `<div class="gh"><span class="gh-l">Растений</span><span class="gh-v">${n}</span></div>` +
+    `<div class="gh"><span class="gh-l">Погода</span><span class="gh-v">${weatherLabel}</span></div>` +
+    `<div class="gh"><span class="gh-l">Урожай</span><span class="gh-v ${harvest != null && harvest < 0 ? "pnl-neg" : "pnl-pos"}">${harvest != null ? (harvest >= 0 ? "+" : "") + fmt(harvest) + "$" : "—"}</span></div>` +
+    `</div>`;
+
+  const skyTop = sunny ? "#a6dcf0" : "#9fb4c4", skyBot = sunny ? "#dff0e6" : "#cdd8dc";
+  const scene =
+    `<div class="garden-plot"><svg viewBox="0 0 ${W.toFixed(0)} ${H.toFixed(0)}" class="garden-svg" preserveAspectRatio="xMidYMax meet">` +
+    `<defs><linearGradient id="gsky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${skyTop}"/><stop offset="1" stop-color="${skyBot}"/></linearGradient></defs>` +
+    `<rect x="0" y="0" width="${W}" height="${H}" fill="url(#gsky)"/>${weather}${tiles}${plantSvg}</svg></div>`;
+
+  el.innerHTML = hud + scene + `<div id="garden-readout" class="garden-readout">${gardenReadoutHTML()}</div>`;
 }
 
 function renderPositions(positions) {
@@ -327,6 +537,8 @@ function connectLive() {
     lastOv = ov;
     // В дзене не тикаем каждые 0.7с — перерисовка раз в минуту.
     if (zen && Date.now() - lastZenRender < ZEN_RENDER_EVERY) return;
+    // Сад перестраивает SVG — не чаще, чем раз в несколько секунд.
+    if (theme === "garden" && Date.now() - lastGardenRender < GARDEN_RENDER_EVERY) return;
     renderOverview(ov);
   };
   ws.onclose = () => {
@@ -766,6 +978,24 @@ document.querySelectorAll(".theme-opt").forEach((b) =>
 document.addEventListener("click", (e) => {
   if (!themeMenu.hidden && !e.target.closest(".theme-wrap")) themeMenu.hidden = true;
 });
+
+// Сад: тап по растению — показать позицию в подписи под сценой.
+const gardenEl = $("garden");
+if (gardenEl) {
+  gardenEl.addEventListener("click", (e) => {
+    const g = e.target.closest("[data-i]");
+    if (!g) return;
+    const pos = lastOv ? lastOv.positions || [] : [];
+    const p = pos[+g.dataset.i];
+    if (!p) return;
+    haptic();
+    gardenSelSym = gardenSelSym === p.symbol ? null : p.symbol;
+    gardenEl.querySelectorAll(".garden-plant.sel").forEach((x) => x.classList.remove("sel"));
+    if (gardenSelSym) g.classList.add("sel");
+    const ro = $("garden-readout");
+    if (ro) ro.innerHTML = gardenReadoutHTML();
+  });
+}
 
 $("refresh").addEventListener("click", async () => {
   haptic("medium");
