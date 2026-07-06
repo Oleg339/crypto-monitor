@@ -133,6 +133,7 @@ let lastEquityVal = null; // для подсветки изменения equity
 function renderOverview(ov) {
   lastOv = ov;
   lastZenRender = Date.now();
+  noteGardenEvents(ov); // события сбора/гибели при закрытии позиций
   if (theme === "garden") {
     renderGarden(ov);
     $("updated-text").textContent = "Обновлено " + new Date(ov.updatedAt).toLocaleTimeString("ru-RU");
@@ -253,43 +254,147 @@ function foliage(roe) {
 // px 1 = один пиксель; вся сцена в пиксель-единицах, SVG масштабируется
 // на всю ширину, shape-rendering=crispEdges → чёткие блоки без сглаживания.
 
-// ── Сад на CC0-ассетах (rubberduck / yughues, OpenGameArt) ──────────────────
-const GA = "assets/garden/";
-// метаданные спрайтов: файл, отношение h/w, масштаб к ширине плитки, якорь по Y
-const G_SPRITE = {
-  oak:     { f: "oak.png",      ar: 1,    sc: 1.8,  ay: 0.80 },
-  oak2:    { f: "oak2.png",     ar: 1,    sc: 1.8,  ay: 0.80 },
-  pine:    { f: "pine.png",     ar: 1,    sc: 1.8,  ay: 0.80 },
-  pine2:   { f: "pine2.png",    ar: 1,    sc: 1.7,  ay: 0.80 },
-  bush:    { f: "bush.png",     ar: 0.5,  sc: 1.4,  ay: 0.80 },
-  bush2:   { f: "bush2.png",    ar: 0.5,  sc: 1.2,  ay: 0.80 },
-  shrub:   { f: "shrub.png",    ar: 0.5,  sc: 1.3,  ay: 0.80 },
-  shrub2:  { f: "shrub2.png",   ar: 0.5,  sc: 1.3,  ay: 0.80 },
-  tropical:{ f: "tropical.png", ar: 0.5,  sc: 1.35, ay: 0.80 },
-  cactus:  { f: "cactus.png",   ar: 1,    sc: 1.15, ay: 0.82 },
-  palm:    { f: "palm.png",     ar: 0.5,  sc: 1.7,  ay: 0.80 },
-  grasses: { f: "grasses.png",  ar: 0.5,  sc: 1.0,  ay: 0.84 },
-  weed:    { f: "weed.png",     ar: 0.5,  sc: 0.9,  ay: 0.84 },
+// ── Сад: рисованный пиксель-арт — деревянные грядки-ящики с культурами ───────
+const CPAL = { g: "#43702f", G: "#5f9a3f", l: "#8fca5a", C: "#c6e896", r: "#d0433a", R: "#e07a30", O: "#d98a34", o: "#a9631c", P: "#5f8a3a", t: "#5a3f25",
+  b: "#9a7a3a", B: "#6f5327", y: "#b9a45a" }; // бурые — для увядшего
+// увядшая культура (near-SL): поникшие бурые листья, любой тип
+const CROP_WILT = ["y     y", " b   b ", "  BbB  ", "  bBb  ", "   b   "];
+// культуры по стадиям: 0 пусто · 1 росток · 2 рост · 3 спелое
+// 5 стадий: 0 пусто · 1 росток · 2 рост · 3 завязь · 4 спелое
+const CROPS = {
+  tomato: [[],
+    ["  l  ", " gGg ", "  t  "],
+    ["  ggg  ", " gGGGg ", " gGGg  "],
+    ["  ggGgg  ", " gGGGGGg ", "gGGGlGGGGg", " gGGGGGGg ", "  ggGGgg  ", "   ttt   "],
+    ["  g g g g g  ", " gGGGGGGGGGg ", "gGrGGGlGGGrGg", "gGGGrGGGrGGGg", "gGrGGGGGGGrGg", " gGGGrGrGGGg ", "  gGGGGGGGg  ", "    ttttt    "]],
+  cabbage: [[],
+    ["  l  ", " gGg "],
+    ["  ggg  ", " gGGGg "],
+    ["   gGGGg   ", "  gGGGGGg  ", " gGGGGGGGg ", " ggGGGGGgg "],
+    ["   gGGGg   ", "  gGCCCGg  ", " gGCCCCCGg ", "gGCCGGCCCGg", "gGGCCCCCGGg", " gGGGGGGGg ", "  gg   gg  "]],
+  pumpkin: [[],
+    ["  l  ", " gGg "],
+    ["  ggg  ", " gGPGg "],
+    ["  ggggg  ", " gPPPPPg ", " gPPPPPg ", "  ggggg  "],
+    ["   OOOOO   ", "  OOoOOoO  ", " OOOoOOoOO ", "OOOoOOOoOOO", "OOOoOOOoOOO", " OOOoOOoOO ", "  OOOOOOO  ", "  g     g  "]],
+  carrot: [[],
+    [" l l ", " gGg "],
+    ["l l l", " gGGg "],
+    ["l l l l", " gGGGg ", " gGg   "],
+    [" l l l l l ", "  lGlGlG   ", "  gGGGGg   ", "   RRRR    ", "   RRR     ", "    R      "]],
+  beet: [[],
+    [" l l ", " gGg "],
+    ["l l l", " gGGg "],
+    ["l l l l", " gGGGg "],
+    [" l l l l ", "  lGGl   ", "  gGg    ", "  rrr    ", "  rr     "]],
 };
-const SPECIES = ["oak", "pine", "bush", "shrub2", "tropical", "cactus"];
-const AMBIENTS = ["oak2", "pine2", "bush", "bush2", "shrub", "grasses", "weed", "grasses", "palm", "weed"];
+const CROP_KEYS = ["tomato", "cabbage", "pumpkin", "carrot", "beet"];
 
-// <image>-спрайт, привязанный низом к точке (0,0)
-function spriteImg(key, TW, style) {
-  const m = G_SPRITE[key];
-  const w = TW * m.sc, h = w * m.ar;
-  return `<image href="${GA}${m.f}" x="${(-w / 2).toFixed(1)}" y="${(-h * m.ay).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"${style ? ` style="${style}"` : ""}/>`;
+// пиксельная культура из строк, якорь низ-центр в (cx,cy)
+function cropSvg(cx, cy, rows) {
+  const H = rows.length, W = Math.max(...rows.map((r) => r.length));
+  let s = "";
+  for (let y = 0; y < H; y++) for (let x = 0; x < rows[y].length; x++) {
+    const ch = rows[y][x]; if (ch === " ") continue; const c = CPAL[ch]; if (!c) continue;
+    s += `<rect x="${cx - (W >> 1) + x}" y="${cy - H + y}" width="1.02" height="1.02" fill="${c}"/>`;
+  }
+  return s;
 }
-
+// деревянная приподнятая грядка-ящик, центр земли в (X,Y)
+function bedSvg(X, Y) {
+  const woodT = "#7a5636", woodL = "#6a4a2c", woodR = "#5a3f25", woodD = "#4a3320", plank = "#3a2718", soil = "#3b2b1f", soilL = "#4a3526", speck = "#2b1f15";
+  const HW = 17, HH = 9, SH = 8, iHW = 13, iHH = 7;
+  let s = "";
+  for (let dy = -HH; dy <= HH; dy++) { const hw = Math.round(HW * (1 - Math.abs(dy) / HH)); s += `<rect x="${X - hw}" y="${Y + dy}" width="${2 * hw + 1.02}" height="1.02" fill="${dy < -2 ? woodT : woodL}"/>`; }
+  for (let dy = -iHH; dy <= iHH; dy++) { const hw = Math.round(iHW * (1 - Math.abs(dy) / iHH)); s += `<rect x="${X - hw}" y="${Y + dy}" width="${2 * hw + 1.02}" height="1.02" fill="${(dy & 1) ? soil : soilL}"/>`; }
+  for (let i = 0; i < 6; i++) s += `<rect x="${X - 8 + ((i * 97) % 16)}" y="${Y - 4 + ((i * 53) % 8)}" width="1.02" height="1.02" fill="${speck}"/>`;
+  for (let x = -HW; x <= HW; x++) { const by = Math.round(Y + HH * (1 - Math.abs(x) / HW)); const left = x < 0; s += `<rect x="${X + x}" y="${by}" width="1.02" height="${SH}" fill="${left ? woodD : woodR}"/>`; if ((x + 60) % 6 === 0) s += `<rect x="${X + x}" y="${by}" width="1.02" height="${SH}" fill="${plank}"/>`; s += `<rect x="${X + x}" y="${by + SH - 1}" width="1.02" height="1.02" fill="${plank}"/>`; }
+  return s;
+}
 function gardenReadoutHTML() {
   const pos = lastOv ? lastOv.positions || [] : [];
   const p = pos.find((x) => x.symbol === gardenSelSym);
   if (!p) return `<span class="gr-hint">🌿 Тап — позиция · щипок — зум · двойной тап — сброс</span>`;
   const m = posMetrics(p);
-  const stage = m.tp > 0.66 ? "почти спелое" : m.tp > 0.33 ? "наливается" : "растёт";
+  const stage = m.tp > 0.72 ? "почти спелое" : m.tp > 0.5 ? "наливается" : m.tp > 0.22 ? "растёт" : "росток";
   return `<div class="gr-row"><b>${p.symbol}</b>${dirBadge(p.side)}<span class="badge">${fmt(p.leverage, 0)}x</span>` +
     `<span class="gr-pnl">${pnlSpan(p.unrealisedPnl)} · ROE ${pnlSpan(m.roe, "%", 1)}</span></div>` +
     `<div class="gr-sub">вход $${fmtPrice(p.entryPrice)} · марк $${fmtPrice(p.markPrice)} · до TP ${(m.tp * 100).toFixed(0)}% — ${stage}</div>`;
+}
+
+// событие закрытия позиции: сравниваем прошлый набор символов с текущим.
+// исчез символ → сделка закрыта: в плюсе — «урожай», в минусе — «гибель».
+let gardenPrev = null;
+function noteGardenEvents(ov) {
+  const cur = {};
+  (ov.positions || []).forEach((p) => { cur[p.symbol] = posMetrics(p).roe; });
+  if (gardenPrev && theme === "garden") {
+    for (const sym in cur) if (!(sym in gardenPrev)) gardenToast("plant", sym);       // новая позиция — «посадка»
+    for (const sym in gardenPrev) if (!(sym in cur)) {                                 // позиция закрыта
+      const ok = gardenPrev[sym] >= 0;
+      gardenToast(ok ? "harvest" : "death", sym);
+      if (ok) flyCoins();
+    }
+  }
+  gardenPrev = cur;
+}
+const TOAST_TXT = { plant: "🌱 Посажено — ", harvest: "🌾 Урожай собран — ", death: "🥀 Грядка погибла — " };
+function gardenToast(kind, text) {
+  const el = document.createElement("div");
+  el.className = "garden-toast " + kind;
+  el.textContent = (TOAST_TXT[kind] || "") + text;
+  document.body.appendChild(el);
+  haptic(kind === "death" ? "medium" : "light");
+  setTimeout(() => el.remove(), 3600);
+}
+// монетки летят в счётчик «Урожай»
+function flyCoins() {
+  const target = document.querySelector(".garden-hud .gh:last-child .gh-v");
+  const plot = document.querySelector(".garden-plot");
+  if (!target || !plot) return;
+  const tr = target.getBoundingClientRect(), pr = plot.getBoundingClientRect();
+  const ox = pr.left + pr.width / 2, oy = pr.top + pr.height / 2;
+  for (let i = 0; i < 6; i++) {
+    const c = document.createElement("div");
+    c.className = "garden-coin"; c.textContent = "🪙";
+    c.style.left = ox + "px"; c.style.top = oy + "px";
+    document.body.appendChild(c);
+    requestAnimationFrame(() => {
+      c.style.transition = `transform .9s cubic-bezier(.4,0,.2,1) ${(i * 0.05).toFixed(2)}s, opacity .9s ${(i * 0.05).toFixed(2)}s`;
+      c.style.transform = `translate(${(tr.left + tr.width / 2 - ox + (Math.random() * 22 - 11)).toFixed(0)}px, ${(tr.top - oy).toFixed(0)}px) scale(.55)`;
+      c.style.opacity = "0";
+    });
+    setTimeout(() => c.remove(), 1300 + i * 60);
+  }
+  target.classList.add("gh-pulse");
+  setTimeout(() => target.classList.remove("gh-pulse"), 700);
+}
+// «пока вас не было»: сводка с прошлого визита (localStorage), показываем один раз
+let gardenSummaryDone = false;
+function gardenPersistAndSummary() {
+  if (theme !== "garden" || !lastStatsData || !lastOv) return;
+  const cur = { rp: lastStatsData.realizedPnl || 0, syms: (lastOv.positions || []).map((p) => p.symbol), t: Date.now() };
+  if (!gardenSummaryDone) {
+    gardenSummaryDone = true;
+    let prev = null; try { prev = JSON.parse(localStorage.getItem("gardenSeen")); } catch (e) { /* нет истории */ }
+    if (prev && cur.t - prev.t > 10 * 60 * 1000) {
+      const dRp = cur.rp - prev.rp;
+      const opened = cur.syms.filter((s) => !prev.syms.includes(s)).length;
+      const closed = prev.syms.filter((s) => !cur.syms.includes(s)).length;
+      const parts = [];
+      if (Math.abs(dRp) >= 0.01) parts.push(`урожай ${dRp >= 0 ? "+" : "−"}${fmt(Math.abs(dRp))}$`);
+      if (opened) parts.push(`посажено ${opened}`);
+      if (closed) parts.push(`убрано ${closed}`);
+      if (parts.length) {
+        const el = document.createElement("div");
+        el.className = "garden-toast away";
+        el.textContent = "🌙 Пока вас не было: " + parts.join(" · ");
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 5200);
+      }
+    }
+  }
+  localStorage.setItem("gardenSeen", JSON.stringify(cur));
 }
 
 function renderGarden(ov) {
@@ -297,125 +402,111 @@ function renderGarden(ov) {
   if (!el) return;
   if (gardenInteracting) return; // не пересобирать SVG посреди жеста
   lastGardenRender = Date.now();
-  let bloom = ""; // слой «свечения» (bloom) — размывается фильтром, blend: screen
+  let bloom = ""; // мягкое свечение «спелого» урожая
   const pos = (ov.positions || []).slice(0, 16);
   const bal = ov.balance || {};
-  const TW = 64, TH = 32;
+  const TW = 39, TH = 21;
   const n = pos.length;
-  const G = Math.max(5, Math.min(6, Math.ceil(Math.sqrt(Math.max(1, n))) + 3));
+  const G = Math.max(4, Math.min(6, Math.ceil(Math.sqrt(Math.max(1, n))) + 2));
   const iso = (c, r) => ({ x: (c - r) * TW / 2, y: (c + r) * TH / 2 });
 
   const cells = [];
   for (let r = 0; r < G; r++) for (let c = 0; c < G; c++) cells.push({ c, r });
   cells.sort((a, b) => (a.c + a.r) - (b.c + b.r) || a.c - b.c);
 
-  // пруд — блок 2×2 плиток (одно изображение воды)
-  const water = new Set();
-  [[1, 1], [2, 1], [1, 2], [2, 2]].forEach(([c, r]) => { if (c < G && r < G) water.add(c * 100 + r); });
-
-  // растения-позиции раскидываем по плиткам псевдослучайно (мимо пруда)
-  const shuffled = cells.filter((c) => !water.has(c.c * 100 + c.r))
-    .map((c) => ({ c, k: hashStr(c.c + "_" + c.r + "s") })).sort((a, b) => a.k - b.k).map((o) => o.c);
+  // позиции раскидываем по грядкам псевдослучайно
+  const shuffled = cells.map((c) => ({ c, k: hashStr(c.c + "_" + c.r + "s") })).sort((a, b) => a.k - b.k).map((o) => o.c);
   const posMap = new Map();
   shuffled.slice(0, n).forEach((cell, i) => posMap.set(cell.c * 100 + cell.r, i));
 
-  let minY = 1e9, maxX = -1e9, minX = 1e9, maxY = -1e9;
+  let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
   cells.forEach((cell) => {
     const { x, y } = iso(cell.c, cell.r);
     minX = Math.min(minX, x); maxX = Math.max(maxX, x);
     minY = Math.min(minY, y); maxY = Math.max(maxY, y);
   });
 
-  // плитки травы (шахматная раскраска через фильтр) + пруд
-  let tiles = "";
-  cells.forEach((cell) => {
-    if (water.has(cell.c * 100 + cell.r)) return;
-    const { x, y } = iso(cell.c, cell.r);
-    const alt = (cell.c + cell.r) % 2 ? " garden-tile-b" : "";
-    tiles += `<image class="garden-tile${alt}" href="${GA}tile_grass.png" x="${(x - TW / 2).toFixed(1)}" y="${(y - TH / 2).toFixed(1)}" width="${TW}" height="${TH}"/>`;
-  });
-  if (water.size) {
-    const pc = iso(1.5, 1.5);
-    tiles += `<image href="${GA}tile_water.png" x="${(pc.x - TW).toFixed(1)}" y="${(pc.y - TH).toFixed(1)}" width="${2 * TW}" height="${2 * TH}"/>`;
-    bloom += `<ellipse cx="${(pc.x - 6).toFixed(1)}" cy="${(pc.y - 3).toFixed(1)}" rx="10" ry="4" fill="#dff4fb"/>`;
-  }
-
-  // пропсы: растения-позиции (кликабельны) + фоновая зелень, сорт по глубине
-  const props = [];
+  // каждая клетка — грядка; передние ряды рисуются поверх задних
+  const items = [];
   cells.forEach((cell) => {
     const { x, y } = iso(cell.c, cell.r);
-    const depth = cell.c + cell.r;
-    const key = cell.c * 100 + cell.r;
-    if (water.has(key)) return;
+    const depth = cell.c + cell.r, key = cell.c * 100 + cell.r;
+    let s = bedSvg(x, y);
     if (posMap.has(key)) {
       const i = posMap.get(key);
       const p = pos[i], m = posMetrics(p);
-      const sp = SPECIES[hashStr(p.symbol) % SPECIES.length];
-      const relTop = -TW * G_SPRITE[sp].sc * G_SPRITE[sp].ar * G_SPRITE[sp].ay; // верх спрайта относительно якоря
-      if (m.tp > 0.4) bloom += `<circle cx="${x.toFixed(1)}" cy="${(y + relTop + 10).toFixed(1)}" r="5" fill="${m.long ? "#ff9aa6" : "#ffe08a"}"/>`;
-      // здоровье → насыщенность/яркость спрайта; сильная просадка — увядание
-      const sat = m.roe >= 0 ? 1 : clamp(1 + m.roe / 28, 0.25, 1);
-      const br = m.roe >= 0 ? 1 : clamp(1 + m.roe / 70, 0.72, 1);
-      const wilt = m.sl > 0.6;
-      const filt = `filter:saturate(${sat.toFixed(2)}) brightness(${br.toFixed(2)});${wilt ? "opacity:.82;" : ""}`;
+      const ck = CROP_KEYS[hashStr(p.symbol) % CROP_KEYS.length];
+      const st = m.tp > 0.72 ? 4 : m.tp > 0.5 ? 3 : m.tp > 0.22 ? 2 : 1; // стадия роста ← прогресс к TP
+      const wilt = m.sl > 0.6 || m.roe < -18;           // near-SL / крупный минус → увядшее
+      const rows = wilt ? CROP_WILT : CROPS[ck][st];
+      const sat = m.roe >= 0 ? 1 : clamp(1 + m.roe / 26, 0.45, 1);
+      const filt = (!wilt && m.roe < 0) ? ` style="filter:saturate(${sat.toFixed(2)})"` : ""; // лёгкий минус — выцветает
+      if (rows && rows.length) s += `<g${filt}>${cropSvg(x, y + 3, rows)}</g>`;
+      if (!wilt && st === 4) bloom += `<ellipse cx="${x}" cy="${(y - 3).toFixed(1)}" rx="9" ry="6" fill="${m.long ? "#ffcf9a" : "#ffe6a0"}"/>`;
+      if (wilt) { // падающие листья над чахнущей грядкой
+        const ld = ((hashStr(p.symbol) % 10) * 0.2).toFixed(2);
+        s += `<rect class="garden-leaf" x="${(x - 5).toFixed(1)}" y="${(y - 8).toFixed(1)}" width="2" height="2" fill="#a9863c" style="animation-delay:${ld}s"/>`;
+        s += `<rect class="garden-leaf" x="${(x + 4).toFixed(1)}" y="${(y - 6).toFixed(1)}" width="2" height="2" fill="#8a672c" style="animation-delay:${(+ld + 1.1).toFixed(2)}s"/>`;
+      }
       const sel = p.symbol === gardenSelSym;
-      let g = `<g class="garden-plant${sel ? " sel" : ""}" data-i="${i}" transform="translate(${x.toFixed(1)},${y.toFixed(1)})">`;
-      if (sel) g += `<ellipse cx="0" cy="0" rx="${(TW * 0.5).toFixed(0)}" ry="${(TH * 0.5).toFixed(0)}" fill="none" stroke="#ffe08a" stroke-width="2"/>`;
-      g += spriteImg(sp, TW, filt);
-      // флажок направления
-      const fx = TW * 0.26, ft = relTop * 0.62; // флажок у верхушки
-      g += `<line x1="${fx.toFixed(1)}" y1="${ft.toFixed(1)}" x2="${fx.toFixed(1)}" y2="${(ft - 16).toFixed(1)}" stroke="#4a3c2a" stroke-width="1.8"/>` +
-        `<path d="M${fx.toFixed(1)} ${(ft - 16).toFixed(1)} l10 3 l-10 3 z" fill="${m.long ? "#37b26a" : "#e0566a"}"/>`;
-      g += `</g>`;
-      props.push({ depth, y, svg: g });
+      const bob = ((cell.c + cell.r) * 0.22 + (hashStr(p.symbol) % 10) * 0.13).toFixed(2);
+      let g = `<g class="garden-plant garden-bob${sel ? " sel" : ""}" data-i="${i}" style="animation-delay:${bob}s">`;
+      g += `<rect x="${(x - 19).toFixed(1)}" y="${(y - 16).toFixed(1)}" width="38" height="35" fill="transparent"/>`;
+      g += s + `</g>`;
+      items.push({ depth, y, svg: g });
     } else {
-      const h = hashStr("a" + cell.c + "_" + cell.r) % 10;
-      if (h < 2) return; // пустая трава
-      const key2 = AMBIENTS[hashStr("k" + cell.c + "_" + cell.r) % AMBIENTS.length];
-      props.push({ depth, y, svg: `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)})">${spriteImg(key2, TW)}</g>` });
+      // не-позиционная грядка — пустая (только земля)
+      const bob = ((cell.c + cell.r) * 0.22 + (hashStr("a" + cell.c + "_" + cell.r) % 10) * 0.13).toFixed(2);
+      items.push({ depth, y, svg: `<g class="garden-bob" style="animation-delay:${bob}s">${s}</g>` });
     }
   });
-  props.sort((a, b) => a.depth - b.depth || a.y - b.y);
-  const propSvg = props.map((p) => p.svg).join("");
+  items.sort((a, b) => a.depth - b.depth || a.y - b.y);
+  const body = items.map((it) => it.svg).join("");
 
-  // границы вьюпорта (сверху — место под высокие деревья)
-  const pad = TW * 0.7;
+  const pad = TW * 0.6;
   const vbMinX = minX - pad, vbW = (maxX - minX) + 2 * pad;
-  const vbMinY = minY - TW * 1.5, vbMaxY = maxY + TH + TW * 0.4;
+  const vbMinY = minY - 22, vbMaxY = maxY + 24;
   const vbH = vbMaxY - vbMinY;
 
   const up = bal.unrealisedPnl || 0;
-  const sunny = up > 0.5, storm = up < -20;
-  const sunX = maxX - TW * 0.2, sunY = vbMinY + TW * 0.35;
-  let weather = "";
-  if (sunny) {
-    weather = `<circle cx="${sunX.toFixed(1)}" cy="${sunY.toFixed(1)}" r="13" fill="#ffd24a"/>`;
-    bloom += `<circle cx="${sunX.toFixed(1)}" cy="${sunY.toFixed(1)}" r="16" fill="#fff2b0"/><circle cx="${sunX.toFixed(1)}" cy="${sunY.toFixed(1)}" r="40" fill="#ffe79a" opacity="0.5"/>`;
-  } else {
-    weather = `<g fill="#e6ecf1"><ellipse cx="${(sunX - 8).toFixed(1)}" cy="${sunY.toFixed(1)}" rx="20" ry="12"/><ellipse cx="${(sunX + 8).toFixed(1)}" cy="${(sunY + 4).toFixed(1)}" rx="15" ry="10"/></g>`;
-    if (storm) for (let d = 0; d < 4; d++) weather += `<line class="garden-rain" x1="${(sunX - 12 + d * 8).toFixed(1)}" y1="${(sunY + 12).toFixed(1)}" x2="${(sunX - 14 + d * 8).toFixed(1)}" y2="${(sunY + 20).toFixed(1)}" stroke="#8fb8d8" stroke-width="2" style="animation-delay:${(d * 0.2).toFixed(1)}s"/>`;
-  }
-
+  const weatherLabel = up > 0.5 ? "☀ ясно" : up < -20 ? "🌧 буря" : "☁ облачно";
   const harvest = lastStatsData ? lastStatsData.realizedPnl : null;
-  const weatherLabel = sunny ? "☀ ясно" : storm ? "🌧 буря" : "☁ облачно";
   const hud =
     `<div class="garden-hud">` +
-    `<div class="gh"><span class="gh-l">Растений</span><span class="gh-v">${n}</span></div>` +
+    `<div class="gh"><span class="gh-l">Грядок</span><span class="gh-v">${n}</span></div>` +
     `<div class="gh"><span class="gh-l">Погода</span><span class="gh-v">${weatherLabel}</span></div>` +
     `<div class="gh"><span class="gh-l">Урожай</span><span class="gh-v ${harvest != null && harvest < 0 ? "pnl-neg" : "pnl-pos"}">${harvest != null ? (harvest >= 0 ? "+" : "") + fmt(harvest) + "$" : "—"}</span></div>` +
     `</div>`;
 
-  const skyTop = sunny ? "#a6dcf0" : "#9fb4c4", skyBot = sunny ? "#dff0e6" : "#cdd8dc";
+  // день/ночь по локальному часу + мелкая живность (бабочки днём, светлячки ночью)
+  const hh = new Date().getHours();
+  const night = hh < 5 || hh >= 22;
+  const bgCol = hh < 5 ? "#241f2b" : hh < 8 ? "#463943" : hh < 18 ? "#4a3d42" : hh < 21 ? "#4a3540" : hh < 22 ? "#3a2f3a" : "#241f2b";
+  const midY = (vbMinY + vbMaxY) / 2;
+  let critters = "";
+  if (night) {
+    for (let i = 0; i < 3; i++) bloom += `<circle class="garden-firefly" cx="${(vbMinX + vbW * (0.28 + 0.22 * i)).toFixed(0)}" cy="${(midY - 18 + i * 10).toFixed(0)}" r="1.6" fill="#ffe89a" style="animation-delay:${(i * 0.8).toFixed(1)}s"/>`;
+  } else {
+    for (let i = 0; i < 2; i++) critters += `<g transform="translate(${(vbMinX + vbW * (0.32 + 0.34 * i)).toFixed(0)},${(vbMinY + 22 + i * 16).toFixed(0)})"><g class="garden-bfly" style="animation-delay:${(i * 2.3).toFixed(1)}s"><rect x="-2.4" y="0" width="2" height="2" fill="#f2d24a"/><rect x="1" y="0" width="2" height="2" fill="#f2d24a"/><rect x="-0.2" y="0.4" width="1" height="1.4" fill="#b58a24"/></g></g>`;
+  }
+
   const scene =
-    `<div class="garden-plot"><svg viewBox="${vbMinX.toFixed(0)} ${vbMinY.toFixed(0)} ${vbW.toFixed(0)} ${vbH.toFixed(0)}" class="garden-svg" preserveAspectRatio="xMidYMid meet">` +
-    `<defs><linearGradient id="gsky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${skyTop}"/><stop offset="1" stop-color="${skyBot}"/></linearGradient>` +
-    `<filter id="gbloom" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="3"/></filter></defs>` +
-    `<rect x="${vbMinX}" y="${vbMinY}" width="${vbW}" height="${vbH}" fill="url(#gsky)"/>${weather}${tiles}${propSvg}` +
+    `<div class="garden-plot"><svg viewBox="${vbMinX.toFixed(0)} ${vbMinY.toFixed(0)} ${vbW.toFixed(0)} ${vbH.toFixed(0)}" class="garden-svg" shape-rendering="crispEdges" preserveAspectRatio="xMidYMid meet">` +
+    `<defs><filter id="gbloom" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="2.4"/></filter></defs>` +
+    `<rect x="${vbMinX}" y="${vbMinY}" width="${vbW}" height="${vbH}" fill="${bgCol}"/>${body}${critters}` +
     `<g class="garden-bloom" filter="url(#gbloom)">${bloom}</g></svg></div>`;
 
-  el.innerHTML = hud + scene +
-    `<div id="garden-readout" class="garden-readout">${gardenReadoutHTML()}</div>` +
-    `<div class="garden-credit">Ассеты: rubberduck / yughues · OpenGameArt · CC0</div>`;
+  // амбар / альманах — накопительная витрина реальной статистики
+  const alm = lastStatsData
+    ? `<div class="garden-almanac">` +
+      `<div class="alm"><span>🧺 Собрано</span><b class="${lastStatsData.realizedPnl < 0 ? "pnl-neg" : "pnl-pos"}">${(lastStatsData.realizedPnl >= 0 ? "+" : "") + fmt(lastStatsData.realizedPnl)}$</b></div>` +
+      `<div class="alm"><span>🌾 Урожаев</span><b>${lastStatsData.closed}</b></div>` +
+      `<div class="alm"><span>⭐ Рекорд</span><b>${pnlSpan(lastStatsData.bestPct, "%", 1)}</b></div>` +
+      `<div class="alm"><span>🎯 Винрейт</span><b>${lastStatsData.winRate != null ? fmt(lastStatsData.winRate, 0) + "%" : "—"}</b></div>` +
+      `</div>`
+    : "";
+
+  el.innerHTML = hud + scene + `<div id="garden-readout" class="garden-readout">${gardenReadoutHTML()}</div>` + alm;
   applyGardenTransform();
 }
 
@@ -533,6 +624,7 @@ async function loadStats() {
     if (loaded.trades) renderTradeStats(st);
     // Реализованный PnL живёт в герое — перерисуем его свежими данными.
     if (lastOv) renderOverview(lastOv);
+    gardenPersistAndSummary(); // «пока вас не было» + сохранение визита
   } catch (e) { /* статистика не критична */ }
 }
 

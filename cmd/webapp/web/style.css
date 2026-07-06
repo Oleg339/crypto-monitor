@@ -706,7 +706,38 @@ body.neo .error { background: var(--bg); box-shadow: var(--shadow-out); border-c
    Хром остаётся тёмным (как obsidian), сама сцена — светлый «террариум».
    Растения = позиции; логика во внешнем renderGarden() (app.js).
    ════════════════════════════════════════════════════════════════════════ */
-body.garden { --accent: #4cae79; }
+/* тема «Сад» — сплошной пиксельный вид: деревянно-мауве палитра,
+   пиксельный шрифт, блочные панели с бевелем (не только сцена, весь хром) */
+body.garden {
+  --bg: #221d29;
+  --bg-2: #221d29;
+  --panel: #2f2733;
+  --panel-2: #3a303e;
+  --hair: #4c4049;
+  --hair-2: #66576a;
+  --ink: #e8dfe2;
+  --ink-2: #b3a6ae;
+  --ink-3: #7d7079;
+  --accent: #cba876;
+  --radius: 2px;
+  --ff-ui: "Pixelify Sans", "Hanken Grotesk", sans-serif;
+  --ff-mono: "Pixelify Sans", "IBM Plex Mono", monospace;
+  --ff-display: "Pixelify Sans", "Hanken Grotesk", sans-serif;
+  letter-spacing: 0.3px;
+}
+/* блочные панели с пиксельным бевелем (свет сверху-слева, тень снизу-справа) */
+body.garden .card,
+body.garden .stat-grid, body.garden .stat,
+body.garden .row, body.garden .chip, body.garden .filters .chip,
+body.garden .icon-btn, body.garden #tabs, body.garden #tab-glider,
+body.garden .expectation, body.garden .hero,
+body.garden .garden-hud .gh, body.garden .garden-almanac .alm,
+body.garden .garden-readout, body.garden #theme-menu, body.garden .garden-plot {
+  border-width: 2px;
+  backdrop-filter: none;
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.05), inset -2px -2px 0 rgba(0, 0, 0, 0.35);
+}
+body.garden .garden-toast { border: 2px solid rgba(0, 0, 0, 0.35); box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12); }
 
 /* в саду прячем обычные блоки обзора, показываем только сцену */
 #garden { display: none; }
@@ -746,7 +777,7 @@ body.garden #garden { display: block; }
   height: 58vh;
   max-height: 520px;
   min-height: 300px;
-  background: #cdd8dc;
+  background: #413539;
   touch-action: none;
   box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.12);
 }
@@ -761,8 +792,48 @@ body.garden #garden { display: block; }
   width: 100%; height: 100%; display: block;
   transform-origin: center center;
   will-change: transform;
+  image-rendering: pixelated; image-rendering: crisp-edges;
 }
 .garden-tile-b { filter: brightness(0.93) saturate(0.96); }
+/* грядки лениво парят вверх-вниз на пару пикселей */
+.garden-bob { animation: garden-bob 2.9s ease-in-out infinite; }
+@keyframes garden-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+/* выбранная грядка — мгновенная золотистая подсветка по тапу */
+.garden-plant.sel { filter: brightness(1.2) drop-shadow(0 0 2px #ffe6a0) drop-shadow(0 0 5px #ffcf5a); }
+/* падающие листья над чахнущей грядкой */
+.garden-leaf { animation: garden-leaf 2.4s ease-in infinite; }
+@keyframes garden-leaf { 0% { opacity: 0.9; transform: translate(0, 0); } 100% { opacity: 0; transform: translate(-3px, 11px); } }
+/* баннер события: сбор урожая / гибель грядки */
+.garden-toast {
+  position: fixed; left: 50%; top: calc(80px + var(--safe-top)); transform: translateX(-50%);
+  z-index: 60; padding: 9px 15px; border-radius: 11px;
+  font-family: var(--ff-ui); font-size: 13.5px; font-weight: 600; white-space: nowrap;
+  color: #fff; box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.7);
+  animation: garden-toast 3.3s ease both;
+}
+.garden-toast.harvest { background: #2f8f52; }
+.garden-toast.death { background: #a2453e; }
+.garden-toast.plant { background: #3a6a8a; }
+.garden-toast.away { background: #4a3f6a; max-width: 88vw; white-space: normal; text-align: center; }
+@keyframes garden-toast {
+  0% { opacity: 0; transform: translate(-50%, -10px); }
+  10%, 78% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -10px); }
+}
+/* монетки урожая, летящие в счётчик */
+.garden-coin { position: fixed; z-index: 61; font-size: 15px; pointer-events: none; will-change: transform, opacity; }
+.garden-hud .gh-v.gh-pulse { animation: gh-pulse 0.7s ease; display: inline-block; }
+@keyframes gh-pulse { 0%, 100% { transform: scale(1); } 40% { transform: scale(1.25); filter: brightness(1.35); } }
+/* мелкая живность */
+.garden-bfly { animation: garden-bfly 13s ease-in-out infinite; }
+@keyframes garden-bfly { 0% { transform: translate(0, 0); } 25% { transform: translate(34px, -14px); } 50% { transform: translate(64px, 6px); } 75% { transform: translate(30px, 18px); } 100% { transform: translate(0, 0); } }
+.garden-firefly { animation: garden-firefly 3.4s ease-in-out infinite; }
+@keyframes garden-firefly { 0%, 100% { opacity: 0.18; } 50% { opacity: 1; } }
+/* амбар / альманах */
+.garden-almanac { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
+.garden-almanac .alm { background: var(--panel); border: 1px solid var(--hair); border-radius: 10px; padding: 8px 4px; text-align: center; }
+.garden-almanac .alm span { display: block; font-size: 9.5px; color: var(--ink-3); }
+.garden-almanac .alm b { display: block; margin-top: 3px; font-family: var(--ff-mono); font-size: 13px; font-weight: 600; }
 .garden-plant { cursor: pointer; }
 /* эмуляция bloom-шейдера: размытый слой света в режиме screen */
 .garden-bloom { mix-blend-mode: screen; opacity: 0.85; pointer-events: none; animation: garden-glow 3.4s ease-in-out infinite; }
