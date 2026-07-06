@@ -25,6 +25,8 @@ function applyTgColors() {
 function applyTheme() {
   document.body.classList.toggle("neo", theme === "neo");
   document.body.classList.toggle("garden", theme === "garden");
+  // в саду перетаскивание пальцем не должно закрывать мини-апп
+  try { theme === "garden" ? tg.disableVerticalSwipes() : tg.enableVerticalSwipes(); } catch (e) { /* старый клиент */ }
   document.querySelectorAll(".theme-opt").forEach((b) =>
     b.classList.toggle("active", b.dataset.theme === theme));
   applyTgColors();
@@ -317,7 +319,7 @@ function plantBody(p, m) {
 function gardenReadoutHTML() {
   const pos = lastOv ? lastOv.positions || [] : [];
   const p = pos.find((x) => x.symbol === gardenSelSym);
-  if (!p) return `<span class="gr-hint">🌿 Нажми на растение, чтобы увидеть позицию</span>`;
+  if (!p) return `<span class="gr-hint">🌿 Тап — позиция · щипок — зум · двойной тап — сброс</span>`;
   const m = posMetrics(p);
   const stage = m.tp > 0.66 ? "почти спелое" : m.tp > 0.33 ? "наливается" : "растёт";
   return `<div class="gr-row"><b>${p.symbol}</b>${dirBadge(p.side)}<span class="badge">${fmt(p.leverage, 0)}x</span>` +
@@ -347,6 +349,27 @@ function drawTile(X, Y, TW, TH, EH, alt) {
   return s;
 }
 
+// пиксельная плитка воды (пруд) с бликами
+function drawWaterTile(X, Y, TW, TH, EH) {
+  const top = "#57b4d6", edge = "#3f7f9e", dirt = "#caa25a", dirtD = "#a17a3c";
+  const hh = TH / 2;
+  let s = "";
+  for (let dy = -hh; dy <= hh; dy++) {
+    const hx = Math.round((TW / 2) * (1 - Math.abs(dy) / hh));
+    if (hx <= 0) continue;
+    s += `<rect x="${X - hx}" y="${Math.round(Y + dy)}" width="${2 * hx + PX}" height="${PX}" fill="${top}"/>`;
+  }
+  s += `<rect class="garden-water" x="${X - 6}" y="${Y - 2}" width="5" height="${PX}" fill="#c3ecf6"/>`;
+  s += `<rect class="garden-water" x="${X + 2}" y="${Y + 1}" width="4" height="${PX}" fill="#c3ecf6" style="animation-delay:.9s"/>`;
+  for (let x = -TW / 2; x <= TW / 2; x++) {
+    const by = Math.round(Y + hh * (1 - Math.abs(x) / (TW / 2)));
+    const col = X + x, left = x < 0;
+    s += `<rect x="${col}" y="${by}" width="${PX}" height="${EH}" fill="${left ? lerpColor(edge, "#000000", 0.15) : edge}"/>`;
+    s += `<rect x="${col}" y="${by + EH - 1}" width="${PX}" height="${PX + 0.5}" fill="${left ? dirtD : dirt}"/>`;
+  }
+  return s;
+}
+
 // декоративная зелень на «пустых» плитках — фон для растений-позиций
 const AMB_PAL = {
   G: "#3d8b41", g: "#57a552", l: "#6cb857", T: "#7a5535", t: "#573b22",
@@ -361,9 +384,12 @@ const AMB = {
 };
 
 function renderGarden(ov) {
-  lastGardenRender = Date.now();
   const el = $("garden");
   if (!el) return;
+  if (gardenInteracting) return; // не пересобирать SVG посреди жеста
+  lastGardenRender = Date.now();
+  const shadow = (rx) => `<ellipse cx="0" cy="1.5" rx="${rx}" ry="${(rx * 0.32).toFixed(1)}" fill="#243218" opacity="0.16"/>`;
+  let bloom = ""; // слой «свечения» (bloom) — размывается фильтром, blend: screen
   const pos = (ov.positions || []).slice(0, 16);
   const bal = ov.balance || {};
   const TW = 24, TH = 12, EH = 4;
@@ -375,8 +401,14 @@ function renderGarden(ov) {
   for (let r = 0; r < G; r++) for (let c = 0; c < G; c++) cells.push({ c, r });
   cells.sort((a, b) => (a.c + a.r) - (b.c + b.r) || a.c - b.c);
 
-  // растения-позиции раскидываем по плиткам псевдослучайно
-  const shuffled = cells.map((c) => ({ c, k: hashStr(c.c + "_" + c.r + "s") })).sort((a, b) => a.k - b.k).map((o) => o.c);
+  // пруд — блок 2×2 плиток
+  const water = new Set();
+  [[1, 1], [2, 1], [1, 2], [2, 2]].forEach(([c, r]) => { if (c < G && r < G) water.add(c * 100 + r); });
+  if (water.size) { const pcw = iso(1.5, 1.5); bloom += `<ellipse cx="${pcw.x.toFixed(1)}" cy="${pcw.y.toFixed(1)}" rx="16" ry="8" fill="#bfe8fb"/>`; }
+
+  // растения-позиции раскидываем по плиткам псевдослучайно (мимо пруда)
+  const shuffled = cells.filter((c) => !water.has(c.c * 100 + c.r))
+    .map((c) => ({ c, k: hashStr(c.c + "_" + c.r + "s") })).sort((a, b) => a.k - b.k).map((o) => o.c);
   const posMap = new Map();
   shuffled.slice(0, n).forEach((cell, i) => posMap.set(cell.c * 100 + cell.r, i));
 
@@ -391,7 +423,9 @@ function renderGarden(ov) {
   let tiles = "";
   cells.forEach((cell) => {
     const { x, y } = iso(cell.c, cell.r);
-    tiles += drawTile(x, y, TW, TH, EH, (cell.c + cell.r) % 2);
+    tiles += water.has(cell.c * 100 + cell.r)
+      ? drawWaterTile(x, y, TW, TH, EH)
+      : drawTile(x, y, TW, TH, EH, (cell.c + cell.r) % 2);
   });
 
   // пропсы: растения-позиции (кликабельны) + фоновая зелень, сорт по глубине
@@ -400,15 +434,18 @@ function renderGarden(ov) {
     const { x, y } = iso(cell.c, cell.r);
     const depth = cell.c + cell.r;
     const key = cell.c * 100 + cell.r;
+    if (water.has(key)) return;
     if (posMap.has(key)) {
       const i = posMap.get(key);
       const p = pos[i], m = posMetrics(p);
+      if (m.tp > 0.4) bloom += `<circle cx="${x.toFixed(1)}" cy="${(y - 12).toFixed(1)}" r="3" fill="${m.long ? "#ff8a97" : "#ffd77a"}"/>`;
       const droop = m.sl > 0.45 ? (m.sl - 0.45) * 14 * (m.long ? 1 : -1) : 0;
       const wilt = m.sl > 0.6 || m.roe < -18;
       const sway = (3.4 + (hashStr(p.symbol) % 10) * 0.12).toFixed(2);
       const delay = ((hashStr(p.symbol) % 20) * 0.15).toFixed(2);
       const sel = p.symbol === gardenSelSym;
       let g = `<g class="garden-plant${sel ? " sel" : ""}" data-i="${i}" transform="translate(${x.toFixed(1)},${y.toFixed(1)})">`;
+      g += shadow(6);
       g += `<rect x="-5" y="-2" width="10" height="3" fill="#6b4f34"/><rect x="-6" y="-1" width="12" height="2" fill="#6b4f34"/>`; // лунка
       if (sel) g += `<rect x="-9" y="-24" width="18" height="26" fill="none" stroke="#ffe08a" stroke-width="1"/>`;
       g += `<rect x="-9" y="-24" width="18" height="26" fill="transparent"/>`;
@@ -425,7 +462,9 @@ function renderGarden(ov) {
       else if (h < 9) rows = AMB.coral;
       else rows = AMB.tuft;
       if (rows) {
-        const svg = `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)})">${sprite(rows, AMB_PAL, -Math.floor(rows[0].length / 2), -rows.length)}</g>`;
+        if (rows === AMB.flower) bloom += `<circle cx="${x.toFixed(1)}" cy="${(y - 4).toFixed(1)}" r="3" fill="#ffb9d0"/>`;
+        else if (rows === AMB.coral) bloom += `<circle cx="${x.toFixed(1)}" cy="${(y - 5).toFixed(1)}" r="3.5" fill="#ff7a6a"/>`;
+        const svg = `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)})">${shadow(rows[0].length * 0.42)}${sprite(rows, AMB_PAL, -Math.floor(rows[0].length / 2), -rows.length)}</g>`;
         props.push({ depth, y, svg });
       }
     }
@@ -445,6 +484,7 @@ function renderGarden(ov) {
   let weather = "";
   if (sunny) {
     weather = sprite([" YY ", "YYYY", "YYYY", " YY "], { Y: "#ffd24a" }, sunX, sunY);
+    bloom += `<circle cx="${sunX + 2}" cy="${sunY + 2}" r="10" fill="#fff2b0"/><circle cx="${sunX + 2}" cy="${sunY + 2}" r="26" fill="#ffe79a" opacity="0.5"/>`;
   } else {
     weather = sprite(["  wwww  ", " wwwwww ", "wwwwwwww"], { w: "#dfe6ec" }, sunX - 4, sunY);
     if (storm) for (let d = 0; d < 4; d++) weather += `<rect class="garden-rain" x="${sunX + d * 2}" y="${sunY + 4}" width="${PX}" height="3" fill="#8fb8d8" style="animation-delay:${(d * 0.2).toFixed(1)}s"/>`;
@@ -461,11 +501,14 @@ function renderGarden(ov) {
 
   const skyTop = sunny ? "#a6dcf0" : "#9fb4c4", skyBot = sunny ? "#dff0e6" : "#cdd8dc";
   const scene =
-    `<div class="garden-plot"><svg viewBox="${vbMinX.toFixed(0)} ${vbMinY.toFixed(0)} ${vbW.toFixed(0)} ${vbH.toFixed(0)}" class="garden-svg" shape-rendering="crispEdges" preserveAspectRatio="xMidYMax meet">` +
-    `<defs><linearGradient id="gsky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${skyTop}"/><stop offset="1" stop-color="${skyBot}"/></linearGradient></defs>` +
-    `<rect x="${vbMinX}" y="${vbMinY}" width="${vbW}" height="${vbH}" fill="url(#gsky)"/>${weather}${tiles}${propSvg}</svg></div>`;
+    `<div class="garden-plot"><svg viewBox="${vbMinX.toFixed(0)} ${vbMinY.toFixed(0)} ${vbW.toFixed(0)} ${vbH.toFixed(0)}" class="garden-svg" shape-rendering="crispEdges" preserveAspectRatio="xMidYMid meet">` +
+    `<defs><linearGradient id="gsky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${skyTop}"/><stop offset="1" stop-color="${skyBot}"/></linearGradient>` +
+    `<filter id="gbloom" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="2.6"/></filter></defs>` +
+    `<rect x="${vbMinX}" y="${vbMinY}" width="${vbW}" height="${vbH}" fill="url(#gsky)"/>${weather}${tiles}${propSvg}` +
+    `<g class="garden-bloom" filter="url(#gbloom)">${bloom}</g></svg></div>`;
 
   el.innerHTML = hud + scene + `<div id="garden-readout" class="garden-readout">${gardenReadoutHTML()}</div>`;
+  applyGardenTransform();
 }
 
 function renderPositions(positions) {
@@ -1066,6 +1109,81 @@ if (gardenEl) {
     if (ro) ro.innerHTML = gardenReadoutHTML();
   });
 }
+
+// ── Сад: зум (щипок/колесо) и панорама (перетаскивание пальцем) ───────────────
+let gz = { s: 1, tx: 0, ty: 0 };
+let gardenInteracting = false;
+function gardenSvgEl() { return document.querySelector("#garden .garden-svg"); }
+function applyGardenTransform() {
+  const svg = gardenSvgEl();
+  if (!svg) return;
+  gz.s = clamp(gz.s, 1, 5);
+  const plot = svg.parentElement.getBoundingClientRect();
+  const maxX = (gz.s - 1) * plot.width / 2, maxY = (gz.s - 1) * plot.height / 2;
+  gz.tx = clamp(gz.tx, -maxX, maxX);
+  gz.ty = clamp(gz.ty, -maxY, maxY);
+  svg.style.transform = `translate(${gz.tx.toFixed(1)}px,${gz.ty.toFixed(1)}px) scale(${gz.s.toFixed(3)})`;
+}
+function gardenZoomAt(f, cx, cy) {
+  const svg = gardenSvgEl();
+  if (!svg) return;
+  const r = svg.parentElement.getBoundingClientRect();
+  const fx = cx - r.left - r.width / 2, fy = cy - r.top - r.height / 2;
+  const ns = clamp(gz.s * f, 1, 5), ff = ns / gz.s;
+  gz.tx = ff * gz.tx + (1 - ff) * fx;
+  gz.ty = ff * gz.ty + (1 - ff) * fy;
+  gz.s = ns;
+  applyGardenTransform();
+}
+(function gardenGestures() {
+  const host = $("garden");
+  if (!host) return;
+  let drag = false, lastX = 0, lastY = 0, lastDist = 0, lastTap = 0;
+  const inPlot = (e) => e.target.closest(".garden-plot");
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  host.addEventListener("touchstart", (e) => {
+    if (!inPlot(e)) return;
+    gardenInteracting = true;
+    if (e.touches.length === 1) { drag = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; }
+    else if (e.touches.length === 2) { drag = false; lastDist = dist(e.touches); }
+  }, { passive: true });
+  host.addEventListener("touchmove", (e) => {
+    if (!inPlot(e)) return;
+    if (e.touches.length === 2) {
+      const d = dist(e.touches);
+      if (lastDist > 0) gardenZoomAt(d / lastDist, (e.touches[0].clientX + e.touches[1].clientX) / 2, (e.touches[0].clientY + e.touches[1].clientY) / 2);
+      lastDist = d; e.preventDefault();
+    } else if (drag && e.touches.length === 1) {
+      const dx = e.touches[0].clientX - lastX, dy = e.touches[0].clientY - lastY;
+      lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+      if (gz.s > 1.02 || Math.abs(dx) + Math.abs(dy) > 4) { gz.tx += dx; gz.ty += dy; applyGardenTransform(); e.preventDefault(); }
+    }
+  }, { passive: false });
+  host.addEventListener("touchend", (e) => {
+    if (e.touches.length > 0) return;
+    drag = false; lastDist = 0; gardenInteracting = false;
+    const t = Date.now();
+    if (t - lastTap < 300) { gz = { s: 1, tx: 0, ty: 0 }; applyGardenTransform(); } // двойной тап — сброс
+    lastTap = t;
+  });
+  host.addEventListener("wheel", (e) => {
+    if (!inPlot(e)) return;
+    e.preventDefault();
+    gardenZoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY);
+  }, { passive: false });
+  // мышью (десктоп) — перетаскивание панорамы
+  let mDrag = false, mX = 0, mY = 0;
+  host.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch" || !inPlot(e)) return;
+    mDrag = true; mX = e.clientX; mY = e.clientY;
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (!mDrag) return;
+    gz.tx += e.clientX - mX; gz.ty += e.clientY - mY;
+    mX = e.clientX; mY = e.clientY; applyGardenTransform();
+  });
+  window.addEventListener("pointerup", () => { mDrag = false; });
+})();
 
 $("refresh").addEventListener("click", async () => {
   haptic("medium");

@@ -739,13 +739,35 @@ body.garden #garden { display: block; }
 }
 
 .garden-plot {
+  position: relative;
   border: 1px solid var(--hair);
   border-radius: var(--radius);
   overflow: hidden;
+  height: 58vh;
+  max-height: 520px;
+  min-height: 300px;
   background: #cdd8dc;
+  touch-action: none;
   box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.12);
 }
-.garden-svg { width: 100%; height: auto; display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+/* мягкая виньетка — уют в духе Stardew/Forest */
+.garden-plot::after {
+  content: "";
+  position: absolute; inset: 0; pointer-events: none;
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 55px rgba(20, 34, 14, 0.22);
+}
+.garden-svg {
+  width: 100%; height: 100%; display: block;
+  transform-origin: center center;
+  will-change: transform;
+  image-rendering: pixelated; image-rendering: crisp-edges;
+}
+.garden-water { animation: garden-water 2.6s ease-in-out infinite; }
+@keyframes garden-water { 50% { opacity: 0.4; } }
+/* эмуляция bloom-шейдера: размытый слой света в режиме screen */
+.garden-bloom { mix-blend-mode: screen; opacity: 0.85; pointer-events: none; animation: garden-glow 3.4s ease-in-out infinite; }
+@keyframes garden-glow { 50% { opacity: 0.62; } }
 .garden-plant { cursor: pointer; }
 .garden-sway { transform-box: fill-box; transform-origin: bottom center; animation: garden-sway 4s ease-in-out infinite; }
 @keyframes garden-sway { 0%, 100% { transform: rotate(-1.6deg); } 50% { transform: rotate(1.6deg); } }
