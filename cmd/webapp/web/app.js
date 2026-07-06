@@ -226,6 +226,7 @@ function renderHeroZen(ov) {
 let lastGardenRender = 0;
 const GARDEN_RENDER_EVERY = 4000;
 let gardenSelSym = null;
+const NS = "http://www.w3.org/2000/svg";
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 function hashStr(s) {
@@ -436,6 +437,26 @@ function pixelDisc(cx, cy, r, color) {
   return s;
 }
 
+// мягкое свечение выбранной грядки — пиксельные ромбы в разметке (SVG-нативно,
+// работает и на мобилке в отличие от CSS drop-shadow). Статичное, низкая непрозрачность.
+const SEL_GLOW = [[26, 14, 0.08, "#f0c25a"], [21, 11, 0.12, "#ffd77a"]];
+function selGlowStr(cx, cy) {
+  return `<g class="garden-selglow">` + SEL_GLOW.map(([hw, hh, op, col]) =>
+    `<polygon points="${cx},${(cy - hh)} ${(cx + hw)},${cy} ${cx},${(cy + hh)} ${(cx - hw)},${cy}" fill="${col}" opacity="${op}"/>`).join("") + `</g>`;
+}
+function selGlowDom(cx, cy) {
+  const g = document.createElementNS(NS, "g");
+  g.setAttribute("class", "garden-selglow");
+  SEL_GLOW.forEach(([hw, hh, op, col]) => {
+    const poly = document.createElementNS(NS, "polygon");
+    poly.setAttribute("points", `${cx},${cy - hh} ${cx + hw},${cy} ${cx},${cy + hh} ${cx - hw},${cy}`);
+    poly.setAttribute("fill", col);
+    poly.setAttribute("opacity", op);
+    g.appendChild(poly);
+  });
+  return g;
+}
+
 function renderGarden(ov) {
   const el = $("garden");
   if (!el) return;
@@ -478,7 +499,8 @@ function renderGarden(ov) {
   cells.forEach((cell) => {
     const { x, y } = iso(cell.c, cell.r);
     const depth = cell.c + cell.r, key = cell.c * 100 + cell.r;
-    let s = bedSvg(x, y);
+    const selHere = posMap.has(key) && pos[posMap.get(key)].symbol === gardenSelSym;
+    let s = (selHere ? selGlowStr(x, y) : "") + bedSvg(x, y);
     if (posMap.has(key)) {
       const i = posMap.get(key);
       const p = pos[i], m = posMetrics(p);
@@ -500,7 +522,10 @@ function renderGarden(ov) {
       if (sel) s += `<polygon class="garden-sel" points="${x},${(y - 9).toFixed(0)} ${(x + 17).toFixed(0)},${y} ${x},${(y + 9).toFixed(0)} ${(x - 17).toFixed(0)},${y}" fill="none" stroke="#dca94e" stroke-width="1"/>`;
       const bob = ((cell.c + cell.r) * 0.22 + (hashStr(p.symbol) % 10) * 0.13).toFixed(2);
       let g = `<g class="garden-plant garden-bob${sel ? " sel" : ""}" data-i="${i}" data-cx="${x}" data-cy="${y}" style="animation-delay:${bob}s">`;
-      g += `<rect x="${(x - 19).toFixed(1)}" y="${(y - 16).toFixed(1)}" width="38" height="35" fill="transparent"/>`;
+      // хит-зона = ромб изо-плитки (TW/2×TH/2): плитки стыкуются без нахлёста,
+      // тап всегда попадает ровно в одну грядку (прямоугольник свисал на ряды сзади)
+      const hw = TW / 2, hh = TH / 2;
+      g += `<polygon points="${x},${(y - hh).toFixed(1)} ${(x + hw).toFixed(1)},${y} ${x},${(y + hh).toFixed(1)} ${(x - hw).toFixed(1)},${y}" fill="transparent"/>`;
       g += s + `</g>`;
       items.push({ depth, y, svg: g });
     } else {
@@ -1176,11 +1201,12 @@ if (gardenEl) {
     if (!p) return;
     haptic();
     // выделение обновляем точечно (без пересборки сцены — иначе рвутся анимации)
-    gardenEl.querySelectorAll(".garden-sel").forEach((x) => x.remove());
+    gardenEl.querySelectorAll(".garden-sel, .garden-selglow").forEach((x) => x.remove());
     gardenEl.querySelectorAll(".garden-plant.sel").forEach((x) => x.classList.remove("sel"));
     gardenSelSym = gardenSelSym === p.symbol ? null : p.symbol;
     if (gardenSelSym) {
-      const cx = +g.dataset.cx, cy = +g.dataset.cy, NS = "http://www.w3.org/2000/svg";
+      const cx = +g.dataset.cx, cy = +g.dataset.cy;
+      g.insertBefore(selGlowDom(cx, cy), g.firstChild); // свечение под грядкой
       const poly = document.createElementNS(NS, "polygon");
       poly.setAttribute("class", "garden-sel");
       poly.setAttribute("points", `${cx},${cy - 9} ${cx + 17},${cy} ${cx},${cy + 9} ${cx - 17},${cy}`);

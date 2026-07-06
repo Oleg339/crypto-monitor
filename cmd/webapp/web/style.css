@@ -795,8 +795,9 @@ body.garden #garden { display: block; }
 /* грядки лениво парят вверх-вниз на пару пикселей */
 .garden-bob { animation: garden-bob 2.9s ease-in-out infinite; }
 @keyframes garden-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
-/* выбранная грядка — мгновенная золотистая подсветка по тапу */
-.garden-plant.sel { filter: brightness(1.2) drop-shadow(0 0 2px #ffe6a0) drop-shadow(0 0 5px #ffcf5a); }
+/* выбранная грядка — лёгкое осветление; свечение рисуется SVG-ромбами
+   (.garden-selglow) в разметке, т.к. CSS drop-shadow не работает на мобилке */
+.garden-plant.sel { filter: brightness(1.08); }
 /* падающие листья над чахнущей грядкой */
 .garden-leaf { animation: garden-leaf 2.4s ease-in infinite; }
 @keyframes garden-leaf { 0% { opacity: 0.9; transform: translate(0, 0); } 100% { opacity: 0; transform: translate(-3px, 11px); } }
@@ -830,6 +831,9 @@ body.garden #garden { display: block; }
 /* звёзды мерцают */
 .garden-star { animation: garden-star 3s ease-in-out infinite; }
 @keyframes garden-star { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+/* декоративные слои выделения не должны перехватывать тап — иначе касание
+   попадает на свечение соседней грядки, а не на саму грядку под пальцем */
+.garden-sel, .garden-selglow { pointer-events: none; }
 /* выбранная грядка — мягкая пульсирующая обводка */
 .garden-sel { animation: garden-sel 1.7s ease-in-out infinite; }
 @keyframes garden-sel { 0%, 100% { opacity: 0.5; } 50% { opacity: 0.95; } }
