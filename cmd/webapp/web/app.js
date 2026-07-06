@@ -11,6 +11,7 @@ const THEMES = {
 };
 let theme = localStorage.getItem("theme");
 if (!THEMES[theme]) theme = "obsidian";
+const en = () => theme === "garden"; // тема «Сад» — англ. интерфейс (пиксельный шрифт ровнее)
 
 // Фон под нативные элементы Telegram. На старых клиентах hex не
 // поддерживается — падаем в try/catch на безопасный ключ темы.
@@ -33,6 +34,11 @@ function applyTheme() {
   const TAB_LABELS = { overview: ["Обзор", "Garden"], trades: ["Сделки", "Trades"], orders: ["Ордеры", "Orders"] };
   document.querySelectorAll("#tabs .tab").forEach((b) => {
     const l = TAB_LABELS[b.dataset.tab];
+    if (l) b.textContent = theme === "garden" ? l[1] : l[0];
+  });
+  const CHIP_LABELS = { all: ["Все", "All"], win: ["Прибыльные", "Profit"], loss: ["Убыточные", "Loss"], open: ["Открытые", "Open"] };
+  document.querySelectorAll("#trade-filters .chip").forEach((b) => {
+    const l = CHIP_LABELS[b.dataset.f];
     if (l) b.textContent = theme === "garden" ? l[1] : l[0];
   });
   applyTgColors();
@@ -114,9 +120,10 @@ const fmtDate = (iso) =>
 
 const fmtDur = (a, b) => {
   const mins = Math.round((new Date(b) - new Date(a)) / 60000);
-  if (mins < 60) return mins + " мин";
-  if (mins < 48 * 60) return (mins / 60).toFixed(1).replace(".0", "") + " ч";
-  return Math.round(mins / 1440) + " дн";
+  const u = en() ? ["min", "h", "d"] : ["мин", "ч", "дн"];
+  if (mins < 60) return mins + " " + u[0];
+  if (mins < 48 * 60) return (mins / 60).toFixed(1).replace(".0", "") + " " + u[1];
+  return Math.round(mins / 1440) + " " + u[2];
 };
 
 const isLong = (dir) => {
@@ -403,11 +410,45 @@ function gardenPersistAndSummary() {
   localStorage.setItem("gardenSeen", JSON.stringify(cur));
 }
 
+// сигнатура значимого состояния сада — пересобираем сцену только при её смене
+// (иначе каждый тик/тап рвёт CSS-анимации светлячков, звёзд, парения)
+let lastGardenSig = "";
+function gardenSig(ov) {
+  const parts = (ov.positions || []).map((p) => {
+    const m = posMetrics(p);
+    const st = (m.sl > 0.6 || m.roe < -18) ? "w" : (m.tp > 0.72 ? 4 : m.tp > 0.5 ? 3 : m.tp > 0.22 ? 2 : 1);
+    return p.symbol + st;
+  }).sort().join(",");
+  const up = (ov.balance || {}).unrealisedPnl || 0;
+  const w = up > 0.5 ? "s" : up < -20 ? "t" : "c";
+  const rp = lastStatsData ? Math.round(lastStatsData.realizedPnl || 0) : 0;
+  return parts + "|" + new Date().getHours() + "|" + w + "|" + rp;
+}
+
+// пиксельный залитый диск (для луны)
+function pixelDisc(cx, cy, r, color) {
+  let s = "";
+  for (let dy = -r; dy <= r; dy++) {
+    const w = Math.round(Math.sqrt(r * r - dy * dy));
+    if (w <= 0) continue;
+    s += `<rect x="${cx - w}" y="${cy + dy}" width="${2 * w + 1}" height="1" fill="${color}"/>`;
+  }
+  return s;
+}
+
 function renderGarden(ov) {
   const el = $("garden");
   if (!el) return;
   if (gardenInteracting) return; // не пересобирать SVG посреди жеста
   lastGardenRender = Date.now();
+  // ничего значимого не изменилось — сцену не трогаем (анимации живут), только подпись
+  const sig = gardenSig(ov);
+  if (sig === lastGardenSig && el.querySelector(".garden-svg")) {
+    const ro = $("garden-readout");
+    if (ro && gardenSelSym) ro.innerHTML = gardenReadoutHTML();
+    return;
+  }
+  lastGardenSig = sig;
   let bloom = ""; // мягкое свечение «спелого» урожая
   const pos = (ov.positions || []).slice(0, 16);
   const bal = ov.balance || {};
@@ -455,10 +496,10 @@ function renderGarden(ov) {
         s += `<rect class="garden-leaf" x="${(x + 4).toFixed(1)}" y="${(y - 6).toFixed(1)}" width="2" height="2" fill="#8a672c" style="animation-delay:${(+ld + 1.1).toFixed(2)}s"/>`;
       }
       const sel = p.symbol === gardenSelSym;
-      // подсветка выбранной — пиксельная обводка ромба грядки (рендерится на мобилке, в отличие от CSS-фильтра)
-      if (sel) s += `<polygon points="${x},${(y - 9).toFixed(0)} ${(x + 17).toFixed(0)},${y} ${x},${(y + 9).toFixed(0)} ${(x - 17).toFixed(0)},${y}" fill="none" stroke="#ffe6a0" stroke-width="2"/>`;
+      // подсветка выбранной — мягкая пульсирующая обводка ромба грядки
+      if (sel) s += `<polygon class="garden-sel" points="${x},${(y - 9).toFixed(0)} ${(x + 17).toFixed(0)},${y} ${x},${(y + 9).toFixed(0)} ${(x - 17).toFixed(0)},${y}" fill="none" stroke="#dca94e" stroke-width="1"/>`;
       const bob = ((cell.c + cell.r) * 0.22 + (hashStr(p.symbol) % 10) * 0.13).toFixed(2);
-      let g = `<g class="garden-plant garden-bob${sel ? " sel" : ""}" data-i="${i}" style="animation-delay:${bob}s">`;
+      let g = `<g class="garden-plant garden-bob${sel ? " sel" : ""}" data-i="${i}" data-cx="${x}" data-cy="${y}" style="animation-delay:${bob}s">`;
       g += `<rect x="${(x - 19).toFixed(1)}" y="${(y - 16).toFixed(1)}" width="38" height="35" fill="transparent"/>`;
       g += s + `</g>`;
       items.push({ depth, y, svg: g });
@@ -471,9 +512,14 @@ function renderGarden(ov) {
   items.sort((a, b) => a.depth - b.depth || a.y - b.y);
   const body = items.map((it) => it.svg).join("");
 
+  // день/ночь по локальному часу (день 6–20, ночь 20–6)
+  const hh = new Date().getHours();
+  const night = hh < 6 || hh >= 20;
+  const bgCol = hh < 5 ? "#201b28" : hh < 8 ? "#463943" : hh < 18 ? "#4a3d42" : hh < 20 ? "#4a3540" : hh < 22 ? "#332a35" : "#201b28";
+
   const pad = TW * 0.55;
   const vbMinX = minX - pad, vbW = (maxX - minX) + 2 * pad;
-  const vbMinY = minY - 12, vbMaxY = maxY + 20;
+  const vbMinY = minY - 40, vbMaxY = maxY + 20; // место под небо (солнце/луна дугой)
   const vbH = vbMaxY - vbMinY;
 
   const up = bal.unrealisedPnl || 0;
@@ -486,16 +532,34 @@ function renderGarden(ov) {
     `<div class="gh"><span class="gh-l">Harvest</span><span class="gh-v ${harvest != null && harvest < 0 ? "pnl-neg" : "pnl-pos"}">${harvest != null ? (harvest >= 0 ? "+" : "") + fmt(harvest) + "$" : "—"}</span></div>` +
     `</div>`;
 
-  // день/ночь по локальному часу + мелкая живность (бабочки днём, светлячки ночью)
-  const hh = new Date().getHours();
-  const night = hh < 5 || hh >= 22;
-  const bgCol = hh < 5 ? "#241f2b" : hh < 8 ? "#463943" : hh < 18 ? "#4a3d42" : hh < 21 ? "#4a3540" : hh < 22 ? "#3a2f3a" : "#241f2b";
-  let critters = "";
+  // небесное тело: солнце днём / луна ночью — простой круг с мягким пиксельным
+  // свечением, позиция по времени суток (дуга по небу слева направо)
+  const tod = hh + new Date().getMinutes() / 60;
+  const cf = night ? clamp((hh >= 20 ? tod - 20 : tod + 4) / 10, 0, 1) : clamp((tod - 6) / 14, 0, 1);
+  const bx = Math.round(vbMinX + vbW * (0.12 + 0.76 * cf));
+  const by = Math.round(vbMinY + 5 + (1 - Math.sin(cf * Math.PI)) * 22);
+  const bodyCol = night ? "#e9e3cf" : "#ffd24a", glowCol = night ? "#cdd6ec" : "#ffe08a";
+  let critters =
+    `<g opacity="0.05">${pixelDisc(bx, by, 6, glowCol)}</g>` + // еле заметный ореол
+    pixelDisc(bx, by, 5, bodyCol) +
+    (night // кратеры на луне
+      ? `<rect x="${bx - 2}" y="${by - 2}" width="2" height="2" fill="#cec8b3"/>` +
+        `<rect x="${bx + 1}" y="${by}" width="2" height="1" fill="#cec8b3"/>` +
+        `<rect x="${bx - 1}" y="${by + 2}" width="1" height="1" fill="#cec8b3"/>`
+      : "");
   if (night) {
-    const fpos = [[0.3, 0.42], [0.56, 0.28], [0.72, 0.52], [0.44, 0.62]];
-    fpos.forEach((f, i) => bloom += `<circle class="garden-firefly" cx="${(vbMinX + vbW * f[0]).toFixed(0)}" cy="${(vbMinY + vbH * f[1]).toFixed(0)}" r="1.6" fill="#ffe89a" style="animation-delay:${(i * 0.7).toFixed(1)}s, ${(i * 1.6).toFixed(1)}s"/>`);
+    const stars = [[0.1, 0.05], [0.24, 0.12], [0.38, 0.04], [0.52, 0.1], [0.66, 0.03], [0.16, 0.16], [0.46, 0.15], [0.9, 0.12]];
+    stars.forEach((s, i) => {
+      const sz = i % 3 ? 1 : 2;
+      critters += `<rect class="garden-star" x="${Math.round(vbMinX + vbW * s[0])}" y="${Math.round(vbMinY + vbH * s[1] * 0.5)}" width="${sz}" height="${sz}" fill="#e8e6d8" style="animation-delay:${(i * 0.4).toFixed(1)}s"/>`;
+    });
+    const fpos = [[0.3, 0.6], [0.56, 0.5], [0.72, 0.64], [0.44, 0.7]];
+    fpos.forEach((f, i) => {
+      const fx = Math.round(vbMinX + vbW * f[0]), fy = Math.round(vbMinY + vbH * f[1]);
+      critters += `<g class="garden-firefly" style="animation-delay:${(i * 0.7).toFixed(1)}s, ${(i * 1.6).toFixed(1)}s"><rect x="${fx - 1}" y="${fy - 1}" width="4" height="4" fill="#ffe89a" opacity="0.28"/><rect x="${fx}" y="${fy}" width="2" height="2" fill="#fff4c0"/></g>`;
+    });
   } else {
-    for (let i = 0; i < 2; i++) critters += `<g transform="translate(${(vbMinX + vbW * (0.32 + 0.34 * i)).toFixed(0)},${(vbMinY + 22 + i * 16).toFixed(0)})"><g class="garden-bfly" style="animation-delay:${(i * 2.3).toFixed(1)}s"><rect x="-2.4" y="0" width="2" height="2" fill="#f2d24a"/><rect x="1" y="0" width="2" height="2" fill="#f2d24a"/><rect x="-0.2" y="0.4" width="1" height="1.4" fill="#b58a24"/></g></g>`;
+    for (let i = 0; i < 2; i++) critters += `<g transform="translate(${(vbMinX + vbW * (0.34 + 0.3 * i)).toFixed(0)},${(vbMinY + 24 + i * 14).toFixed(0)})"><g class="garden-bfly" style="animation-delay:${(i * 2.3).toFixed(1)}s"><rect x="-2.4" y="0" width="2" height="2" fill="#f2d24a"/><rect x="1" y="0" width="2" height="2" fill="#f2d24a"/><rect x="-0.2" y="0.4" width="1" height="1.4" fill="#b58a24"/></g></g>`;
   }
 
   const scene =
@@ -610,17 +674,17 @@ function renderExpectation(st) {
 
 function renderTradeStats(st) {
   $("trade-stats").innerHTML =
-    statCell(st.winRate != null ? fmt(st.winRate, 0) + "%" : "—", "Винрейт") +
-    statCell(String(st.closed), "Закрыто") +
-    statCell(pnlSpan(st.bestPct, "%", 1), "Лучшая") +
-    statCell(pnlSpan(st.worstPct, "%", 1), "Худшая");
+    statCell(st.winRate != null ? fmt(st.winRate, 0) + "%" : "—", en() ? "Winrate" : "Винрейт") +
+    statCell(String(st.closed), en() ? "Closed" : "Закрыто") +
+    statCell(pnlSpan(st.bestPct, "%", 1), en() ? "Best" : "Лучшая") +
+    statCell(pnlSpan(st.worstPct, "%", 1), en() ? "Worst" : "Худшая");
 }
 
 async function loadOverview() {
   try {
     renderOverview(await api("/api/overview"));
   } catch (e) {
-    $("balance-card").innerHTML = `<div class="error">Ошибка: ${e.message}</div>`;
+    $("balance-card").innerHTML = `<div class="error">${en() ? "Error" : "Ошибка"}: ${e.message}</div>`;
   }
 }
 
@@ -882,17 +946,17 @@ function renderTrades() {
       <div class="row">
         <div class="main">
           <div><b>${t.symbol}</b>${dirBadge(t.direction)}
-            ${t.status !== "closed" ? `<span class="badge accent">открыта</span>` : ""}
+            ${t.status !== "closed" ? `<span class="badge accent">${en() ? "open" : "открыта"}</span>` : ""}
           </div>
           <div class="sub">$${fmtPrice(t.entry)} → ${t.closePrice ? "$" + fmtPrice(t.closePrice) : "…"}</div>
         </div>
         <div class="right">
           <div>${t.pnlPct != null ? pnlSpan(t.pnlPct, "%") : "—"}${usd}</div>
-          <div class="sub">${fmtTime(t.closedAt || t.openedAt)}${dur && dur !== "0 мин" ? " · " + dur : ""}</div>
+          <div class="sub">${fmtTime(t.closedAt || t.openedAt)}${dur && !/^0 /.test(dur) ? " · " + dur : ""}</div>
         </div>
       </div>`;
     }).join("")
-    : `<div class="muted">Ничего не найдено</div>`;
+    : `<div class="muted">${en() ? "Nothing found" : "Ничего не найдено"}</div>`;
 }
 
 async function loadTrades() {
@@ -901,7 +965,7 @@ async function loadTrades() {
     renderTrades();
     if (lastStatsData) renderTradeStats(lastStatsData);
   } catch (e) {
-    $("trades-list").innerHTML = `<div class="error">Ошибка: ${e.message}</div>`;
+    $("trades-list").innerHTML = `<div class="error">${en() ? "Error" : "Ошибка"}: ${e.message}</div>`;
   }
 }
 
@@ -933,7 +997,7 @@ async function loadOrders() {
   try {
     const { orders, ttlDays } = await api("/api/orders");
     if (!orders.length) {
-      $("orders-list").innerHTML = `<div class="muted">Нет ожидающих ордеров</div>`;
+      $("orders-list").innerHTML = `<div class="muted">${en() ? "No pending orders" : "Нет ожидающих ордеров"}</div>`;
       return;
     }
     $("orders-list").innerHTML = orders.map((o) => {
@@ -945,10 +1009,10 @@ async function loadOrders() {
         ? new Date(new Date(o.createdAt).getTime() + ttlDays * 86400000) : null;
       const leftMs = expires ? expires - Date.now() : 0;
       const leftStr = expires
-        ? (leftMs <= 0 ? "истёк, скоро снимется"
-          : "снимется через " + (leftMs > 48 * 3600000
-            ? Math.round(leftMs / 86400000) + " дн"
-            : Math.round(leftMs / 3600000) + " ч"))
+        ? (leftMs <= 0 ? (en() ? "expired, removing soon" : "истёк, скоро снимется")
+          : (en() ? "removes in " : "снимется через ") + (leftMs > 48 * 3600000
+            ? Math.round(leftMs / 86400000) + (en() ? "d" : " дн")
+            : Math.round(leftMs / 3600000) + (en() ? "h" : " ч")))
         : "";
       const notional = o.price * o.qty;
       return `
@@ -957,18 +1021,18 @@ async function loadOrders() {
           <div><b>${o.symbol}</b>${dirBadge(o.side)}
             <span class="badge">$${fmt(notional, 0)}</span>
           </div>
-          <div class="sub">вход $${fmtPrice(o.price)} · сейчас $${fmtPrice(o.lastPrice)}</div>
+          <div class="sub">${en() ? "entry" : "вход"} $${fmtPrice(o.price)} · ${en() ? "now" : "сейчас"} $${fmtPrice(o.lastPrice)}</div>
           <div class="sub">SL $${fmtPrice(o.stopLoss)} · TP $${fmtPrice(o.takeProfit)}</div>
         </div>
         <div class="right">
-          <div><span class="badge accent">до входа ${distStr}</span></div>
+          <div><span class="badge accent">${en() ? "to entry" : "до входа"} ${distStr}</span></div>
           <div class="sub">${fmtTime(o.createdAt)}</div>
           <div class="sub">${leftStr}</div>
         </div>
       </div>`;
     }).join("");
   } catch (e) {
-    $("orders-list").innerHTML = `<div class="error">Ошибка: ${e.message}</div>`;
+    $("orders-list").innerHTML = `<div class="error">${en() ? "Error" : "Ошибка"}: ${e.message}</div>`;
   }
 }
 
@@ -1111,8 +1175,23 @@ if (gardenEl) {
     const p = pos[+g.dataset.i];
     if (!p) return;
     haptic();
+    // выделение обновляем точечно (без пересборки сцены — иначе рвутся анимации)
+    gardenEl.querySelectorAll(".garden-sel").forEach((x) => x.remove());
+    gardenEl.querySelectorAll(".garden-plant.sel").forEach((x) => x.classList.remove("sel"));
     gardenSelSym = gardenSelSym === p.symbol ? null : p.symbol;
-    if (lastOv) renderGarden(lastOv); // перерисовка со свечением выбранной грядки
+    if (gardenSelSym) {
+      const cx = +g.dataset.cx, cy = +g.dataset.cy, NS = "http://www.w3.org/2000/svg";
+      const poly = document.createElementNS(NS, "polygon");
+      poly.setAttribute("class", "garden-sel");
+      poly.setAttribute("points", `${cx},${cy - 9} ${cx + 17},${cy} ${cx},${cy + 9} ${cx - 17},${cy}`);
+      poly.setAttribute("fill", "none");
+      poly.setAttribute("stroke", "#dca94e");
+      poly.setAttribute("stroke-width", "1");
+      g.appendChild(poly);
+      g.classList.add("sel");
+    }
+    const ro = $("garden-readout");
+    if (ro) ro.innerHTML = gardenReadoutHTML();
   });
 }
 
