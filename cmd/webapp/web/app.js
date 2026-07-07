@@ -315,8 +315,11 @@ function cropSvg(cx, cy, rows) {
   return s;
 }
 // деревянная приподнятая грядка-ящик, центр земли в (X,Y)
-function bedSvg(X, Y) {
-  const woodT = "#7a5636", woodL = "#6a4a2c", woodR = "#5a3f25", woodD = "#4a3320", plank = "#3a2718", soil = "#3b2b1f", soilL = "#4a3526", speck = "#2b1f15";
+function bedSvg(X, Y, mono) {
+  // mono !== undefined → красим весь короб одним цветом (для жёлтой подсветки —
+  // точно та же пиксельная геометрия, чтобы не торчали зубчики грядки)
+  const c = (col) => mono || col;
+  const woodT = c("#7a5636"), woodL = c("#6a4a2c"), woodR = c("#5a3f25"), woodD = c("#4a3320"), plank = c("#3a2718"), soil = c("#3b2b1f"), soilL = c("#4a3526"), speck = c("#2b1f15");
   const HW = 17, HH = 9, SH = 8, iHW = 13, iHH = 7;
   let s = "";
   for (let dy = -HH; dy <= HH; dy++) { const hw = Math.round(HW * (1 - Math.abs(dy) / HH)); s += `<rect x="${X - hw}" y="${Y + dy}" width="${2 * hw + 1.02}" height="1.02" fill="${dy < -2 ? woodT : woodL}"/>`; }
@@ -437,30 +440,17 @@ function pixelDisc(cx, cy, r, color) {
   return s;
 }
 
-// мягкое свечение выбранной грядки — пиксельные ромбы в разметке (SVG-нативно,
-// работает и на мобилке в отличие от CSS drop-shadow). Статичное, низкая непрозрачность.
-const SEL_GLOW = [[26, 14, 0.08, "#f0c25a"], [21, 11, 0.12, "#ffd77a"]];
-// силуэт всей приподнятой грядки (верхний ромб + деревянные боковины вниз на SH),
-// а не только верхняя грань — обводка «обнимает» весь короб
-const selOutline = (cx, cy) =>
-  `${cx},${cy - 9} ${cx + 17},${cy} ${cx + 17},${cy + 8} ${cx},${cy + 17} ${cx - 17},${cy + 8} ${cx - 17},${cy}`;
-const GLOW_DY = 4; // центр свечения ниже верхней грани — чтобы ореол охватывал весь короб
-function selGlowStr(cx, cy) {
-  const gy = cy + GLOW_DY;
-  return `<g class="garden-selglow">` + SEL_GLOW.map(([hw, hh, op, col]) =>
-    `<polygon points="${cx},${(gy - hh)} ${(cx + hw)},${gy} ${cx},${(gy + hh)} ${(cx - hw)},${gy}" fill="${col}" opacity="${op}"/>`).join("") + `</g>`;
+// подсветка выбранной грядки — точно такой же короб грядки, только жёлтый (та же
+// пиксельная геометрия bedSvg). Появляется при выделении, прозрачность мягко
+// пульсирует 0.01→0.05 (класс .garden-selbox).
+const SEL_YELLOW = "#ffe000";
+function selBoxStr(cx, cy) {
+  return `<g class="garden-selbox">${bedSvg(cx, cy, SEL_YELLOW)}</g>`;
 }
-function selGlowDom(cx, cy) {
-  const gy = cy + GLOW_DY;
+function selBoxDom(cx, cy) {
   const g = document.createElementNS(NS, "g");
-  g.setAttribute("class", "garden-selglow");
-  SEL_GLOW.forEach(([hw, hh, op, col]) => {
-    const poly = document.createElementNS(NS, "polygon");
-    poly.setAttribute("points", `${cx},${gy - hh} ${cx + hw},${gy} ${cx},${gy + hh} ${cx - hw},${gy}`);
-    poly.setAttribute("fill", col);
-    poly.setAttribute("opacity", op);
-    g.appendChild(poly);
-  });
+  g.setAttribute("class", "garden-selbox");
+  g.innerHTML = bedSvg(cx, cy, SEL_YELLOW);
   return g;
 }
 
@@ -507,7 +497,7 @@ function renderGarden(ov) {
     const { x, y } = iso(cell.c, cell.r);
     const depth = cell.c + cell.r, key = cell.c * 100 + cell.r;
     const selHere = posMap.has(key) && pos[posMap.get(key)].symbol === gardenSelSym;
-    let s = (selHere ? selGlowStr(x, y) : "") + bedSvg(x, y);
+    let s = bedSvg(x, y);
     if (posMap.has(key)) {
       const i = posMap.get(key);
       const p = pos[i], m = posMetrics(p);
@@ -525,8 +515,8 @@ function renderGarden(ov) {
         s += `<rect class="garden-leaf" x="${(x + 4).toFixed(1)}" y="${(y - 6).toFixed(1)}" width="2" height="2" fill="#8a672c" style="animation-delay:${(+ld + 1.1).toFixed(2)}s"/>`;
       }
       const sel = p.symbol === gardenSelSym;
-      // подсветка выбранной — мягкая пульсирующая обводка ромба грядки
-      if (sel) s += `<polygon class="garden-sel" points="${selOutline(x, y)}" fill="none" stroke="#dca94e" stroke-width="1"/>`;
+      // подсветка выбранной — жёлтый короб поверх грядки
+      if (sel) s += selBoxStr(x, y);
       const bob = ((cell.c + cell.r) * 0.22 + (hashStr(p.symbol) % 10) * 0.13).toFixed(2);
       let g = `<g class="garden-plant garden-bob${sel ? " sel" : ""}" data-i="${i}" data-cx="${x}" data-cy="${y}" style="animation-delay:${bob}s">`;
       // хит-зона = ромб изо-плитки (TW/2×TH/2): плитки стыкуются без нахлёста,
@@ -547,7 +537,14 @@ function renderGarden(ov) {
   // день/ночь по локальному часу (день 6–20, ночь 20–6)
   const hh = new Date().getHours();
   const night = hh < 6 || hh >= 20;
-  const bgCol = hh < 5 ? "#201b28" : hh < 8 ? "#463943" : hh < 18 ? "#4a3d42" : hh < 20 ? "#4a3540" : hh < 22 ? "#332a35" : "#201b28";
+  // палитра неба [зенит, горизонт] по фазе суток: тёмный верх → светлый низ у
+  // горизонта (монотонно, чтобы верх и низ не совпадали). Рисуем пиксельным градиентом.
+  const SKY = hh < 5 ? ["#141020", "#2c2640"]                 // глубокая ночь
+    : hh < 8 ? ["#3f3a5e", "#c07a6a"]                         // рассвет: индиго → розовый горизонт
+    : hh < 18 ? ["#6f9ad6", "#cdd9dd"]                        // день: голубое небо → светлая дымка
+    : hh < 20 ? ["#3a3158", "#c56a44"]                        // закат: фиолет → оранжевый горизонт
+    : hh < 22 ? ["#201b32", "#443652"]                        // вечер
+    : ["#141020", "#2c2640"];                                 // поздняя ночь
 
   const pad = TW * 0.55;
   const vbMinX = minX - pad, vbW = (maxX - minX) + 2 * pad;
@@ -594,10 +591,34 @@ function renderGarden(ov) {
     for (let i = 0; i < 2; i++) critters += `<g transform="translate(${(vbMinX + vbW * (0.34 + 0.3 * i)).toFixed(0)},${(vbMinY + 24 + i * 14).toFixed(0)})"><g class="garden-bfly" style="animation-delay:${(i * 2.3).toFixed(1)}s"><rect x="-2.4" y="0" width="2" height="2" fill="#f2d24a"/><rect x="1" y="0" width="2" height="2" fill="#f2d24a"/><rect x="-0.2" y="0.4" width="1" height="1.4" fill="#b58a24"/></g></g>`;
   }
 
+  // гроза (крупный минус по PnL): косой пиксельный дождь + вспышки молнии
+  let weatherFx = "";
+  if (up < -20) {
+    let rain = `<g class="garden-rain">`;
+    for (let i = 0; i < 26; i++) {
+      const rx = Math.round(vbMinX + vbW * ((i * 0.618) % 1)); // золотое сечение — равномерный разброс
+      const len = 4 + (i % 3);
+      rain += `<rect x="${rx}" y="${vbMinY}" width="1" height="${len}" fill="#9fb4d0" style="animation-delay:${(-(i * 0.13) % 1.1).toFixed(2)}s"/>`;
+    }
+    rain += `</g>`;
+    const boltX = Math.round(vbMinX + vbW * 0.68);
+    const bolt = `<polyline class="garden-bolt" points="${boltX},${vbMinY + 2} ${boltX - 4},${vbMinY + 13} ${boltX + 2},${vbMinY + 13} ${boltX - 3},${vbMinY + 27}" fill="none" stroke="#fdf4c0" stroke-width="1.4"/>`;
+    const flash = `<rect class="garden-flash" x="${vbMinX}" y="${vbMinY}" width="${vbW}" height="${vbH}" fill="#dfe6f5"/>`;
+    weatherFx = flash + rain + bolt;
+  }
+
+  // небо пиксельным градиентом: 2px-полосы, зенит→горизонт по всей высоте.
+  // именно полосами (не SVG-градиентом) — иначе image-rendering:pixelated бьёт его на бляшки
+  let sky = "";
+  for (let r = 0; r < vbH; r += 2) {
+    const col = lerpColor(SKY[0], SKY[1], r / vbH);
+    sky += `<rect x="${vbMinX}" y="${(vbMinY + r).toFixed(0)}" width="${vbW}" height="2.04" fill="${col}"/>`;
+  }
+
   const scene =
     `<div class="garden-plot"><svg viewBox="${vbMinX.toFixed(0)} ${vbMinY.toFixed(0)} ${vbW.toFixed(0)} ${vbH.toFixed(0)}" class="garden-svg" shape-rendering="crispEdges" preserveAspectRatio="xMidYMid meet">` +
     `<defs><filter id="gbloom" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="2.4"/></filter></defs>` +
-    `<rect x="${vbMinX}" y="${vbMinY}" width="${vbW}" height="${vbH}" fill="${bgCol}"/>${body}${critters}` +
+    `${sky}${body}${critters}${weatherFx}` +
     `<g class="garden-bloom" filter="url(#gbloom)">${bloom}</g></svg></div>`;
 
   // амбар / альманах — накопительная витрина реальной статистики
@@ -1208,19 +1229,12 @@ if (gardenEl) {
     if (!p) return;
     haptic();
     // выделение обновляем точечно (без пересборки сцены — иначе рвутся анимации)
-    gardenEl.querySelectorAll(".garden-sel, .garden-selglow").forEach((x) => x.remove());
+    gardenEl.querySelectorAll(".garden-selbox").forEach((x) => x.remove());
     gardenEl.querySelectorAll(".garden-plant.sel").forEach((x) => x.classList.remove("sel"));
     gardenSelSym = gardenSelSym === p.symbol ? null : p.symbol;
     if (gardenSelSym) {
       const cx = +g.dataset.cx, cy = +g.dataset.cy;
-      g.insertBefore(selGlowDom(cx, cy), g.firstChild); // свечение под грядкой
-      const poly = document.createElementNS(NS, "polygon");
-      poly.setAttribute("class", "garden-sel");
-      poly.setAttribute("points", selOutline(cx, cy));
-      poly.setAttribute("fill", "none");
-      poly.setAttribute("stroke", "#dca94e");
-      poly.setAttribute("stroke-width", "1");
-      g.appendChild(poly);
+      g.appendChild(selBoxDom(cx, cy)); // жёлтый короб поверх грядки
       g.classList.add("sel");
     }
     const ro = $("garden-readout");

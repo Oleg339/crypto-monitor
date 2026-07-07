@@ -795,8 +795,8 @@ body.garden #garden { display: block; }
 /* грядки лениво парят вверх-вниз на пару пикселей */
 .garden-bob { animation: garden-bob 2.9s ease-in-out infinite; }
 @keyframes garden-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
-/* выбранная грядка — лёгкое осветление; свечение рисуется SVG-ромбами
-   (.garden-selglow) в разметке, т.к. CSS drop-shadow не работает на мобилке */
+/* выбранная грядка — лёгкое осветление; сама подсветка рисуется жёлтым коробом
+   (.garden-selbox) в разметке, т.к. CSS drop-shadow не работает на мобилке */
 .garden-plant.sel { filter: brightness(1.08); }
 /* падающие листья над чахнущей грядкой */
 .garden-leaf { animation: garden-leaf 2.4s ease-in infinite; }
@@ -831,15 +831,23 @@ body.garden #garden { display: block; }
 /* звёзды мерцают */
 .garden-star { animation: garden-star 3s ease-in-out infinite; }
 @keyframes garden-star { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
-/* декоративные слои выделения не должны перехватывать тап — иначе касание
-   попадает на свечение соседней грядки, а не на саму грядку под пальцем */
-.garden-sel, .garden-selglow { pointer-events: none; }
-/* выбранная грядка — мягкая пульсирующая обводка */
-.garden-sel { animation: garden-sel 1.7s ease-in-out infinite; }
-@keyframes garden-sel { 0%, 100% { opacity: 0.5; } 50% { opacity: 0.95; } }
+/* слой подсветки не должен перехватывать тап — иначе касание попадает на
+   подсветку соседней грядки, а не на саму грядку под пальцем */
+.garden-selbox { pointer-events: none; }
+/* выбранная грядка — жёлтый короб с мягко пульсирующей прозрачностью */
+.garden-selbox { animation: garden-selbox 1.7s ease-in-out infinite; }
+@keyframes garden-selbox { 0%, 100% { opacity: 0.10; } 50% { opacity: 0.20; } }
 /* мягкое «дыхание» свечения солнца/луны */
 .garden-glow { animation: garden-glow 4.5s ease-in-out infinite; }
 @keyframes garden-glow { 0%, 100% { opacity: 0.015; } 50% { opacity: 0.04; } }
+/* гроза: косой дождь + вспышки молнии (декор — тап не перехватывает) */
+.garden-rain, .garden-flash, .garden-bolt { pointer-events: none; }
+.garden-rain rect { animation: garden-rain 0.9s linear infinite; }
+@keyframes garden-rain { from { transform: translate(0, 0); opacity: 0.55; } to { transform: translate(-12px, 150px); opacity: 0.55; } }
+.garden-flash { opacity: 0; animation: garden-flash 6s ease-out infinite; }
+@keyframes garden-flash { 0%, 7%, 100% { opacity: 0; } 2% { opacity: 0.5; } 4% { opacity: 0.12; } 5% { opacity: 0.42; } }
+.garden-bolt { opacity: 0; animation: garden-bolt 6s ease-out infinite; }
+@keyframes garden-bolt { 0%, 7%, 100% { opacity: 0; } 2% { opacity: 0.95; } 4% { opacity: 0.25; } 5% { opacity: 0.9; } }
 /* амбар / альманах */
 .garden-almanac { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
 .garden-almanac .alm { background: var(--panel); border: 1px solid var(--hair); border-radius: 10px; padding: 8px 4px; text-align: center; }
