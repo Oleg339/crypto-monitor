@@ -468,7 +468,9 @@ function renderGarden(ov) {
   }
   lastGardenSig = sig;
   let bloom = ""; // мягкое свечение «спелого» урожая
-  const pos = (ov.positions || []).slice(0, 16);
+  // сортируем по символу — иначе позиции приходят из API в произвольном порядке
+  // и каждый вход раскидывает растения по другим грядкам
+  const pos = (ov.positions || []).slice(0, 16).sort((a, b) => (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0));
   const bal = ov.balance || {};
   const TW = 39, TH = 21;
   const n = pos.length;
@@ -518,7 +520,7 @@ function renderGarden(ov) {
       // подсветка выбранной — жёлтый короб поверх грядки
       if (sel) s += selBoxStr(x, y);
       const bob = ((cell.c + cell.r) * 0.22 + (hashStr(p.symbol) % 10) * 0.13).toFixed(2);
-      let g = `<g class="garden-plant garden-bob${sel ? " sel" : ""}" data-i="${i}" data-cx="${x}" data-cy="${y}" style="animation-delay:${bob}s">`;
+      let g = `<g class="garden-plant garden-bob${sel ? " sel" : ""}" data-i="${i}" data-sym="${p.symbol}" data-cx="${x}" data-cy="${y}" style="animation-delay:${bob}s">`;
       // хит-зона = ромб изо-плитки (TW/2×TH/2): плитки стыкуются без нахлёста,
       // тап всегда попадает ровно в одну грядку (прямоугольник свисал на ряды сзади)
       const hw = TW / 2, hh = TH / 2;
@@ -1222,10 +1224,10 @@ document.addEventListener("click", (e) => {
 const gardenEl = $("garden");
 if (gardenEl) {
   gardenEl.addEventListener("click", (e) => {
-    const g = e.target.closest("[data-i]");
+    const g = e.target.closest("[data-sym]");
     if (!g) return;
     const pos = lastOv ? lastOv.positions || [] : [];
-    const p = pos[+g.dataset.i];
+    const p = pos.find((x) => x.symbol === g.dataset.sym); // по символу, не по индексу
     if (!p) return;
     haptic();
     // выделение обновляем точечно (без пересборки сцены — иначе рвутся анимации)
