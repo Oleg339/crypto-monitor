@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -883,13 +884,17 @@ func (b *Bot) sendSignalMsg(sig *ParsedSignal, dbID int64, allowAuto bool) {
 			text += warn
 			log.Printf("[bot] auto-skip signal #%d %s: BTC near 10d high", sig.ID, sig.Symbol)
 		} else {
+			// Сообщение шлём ради прогресс-статуса, но НЕ завязываем на него ордер:
+			// в WAN-стойл message_id может не вернуться (сообщение дошло, а ответ — нет),
+			// а сделку терять нельзя. Исполняем в любом случае; при msgID==0 editMsg
+			// сам отправит статус новым сообщением.
 			msgID := b.sendGetID(b.chatID, text+"\n\n🤖 <i>Авторежим — исполняю без подтверждения</i>")
-			if msgID > 0 {
-				log.Printf("[bot] auto-executing signal #%d %s", sig.ID, sig.Symbol)
-				b.confirmSignal(&tgMessage{MessageID: msgID, Chat: tgChat{ID: b.chatID}}, id, ps)
-				return
+			log.Printf("[bot] auto-executing signal #%d %s", sig.ID, sig.Symbol)
+			if msgID == 0 {
+				log.Printf("[bot] auto #%d %s: message_id не получен (сетевой стойл?) — исполняю, статус уйдёт новым сообщением", sig.ID, sig.Symbol)
 			}
-			// не узнали message_id — падаем на ручное подтверждение
+			b.confirmSignal(&tgMessage{MessageID: msgID, Chat: tgChat{ID: b.chatID}}, id, ps)
+			return
 		}
 	}
 
@@ -1149,7 +1154,7 @@ func (b *Bot) btcHighWarn() string {
 		return fmt.Sprintf(
 			"\n\n⚠️ <i>Авторежим пропустил вход: BTC в %.1f%% от 10-дневного максимума "+
 				"(порог %.0f%%) — зона, где лонги исторически убыточны. Решай вручную.</i>",
-			-dist, pct)
+			math.Abs(dist), pct)
 	}
 	return ""
 }
@@ -1321,6 +1326,10 @@ func (b *Bot) sendGetID(chatID int64, text string) int {
 }
 
 func (b *Bot) editMsg(chatID int64, msgID int, text string, kb json.RawMessage) {
+	if msgID == 0 { // нечего редактировать (первый send не прошёл в стойл) — шлём новым сообщением
+		b.send(chatID, 0, text, kb)
+		return
+	}
 	body := map[string]interface{}{
 		"chat_id":    chatID,
 		"message_id": msgID,

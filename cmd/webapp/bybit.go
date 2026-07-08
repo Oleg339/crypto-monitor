@@ -14,7 +14,9 @@ import (
 	"github.com/yourorg/crypto-monitor/internal/bybit"
 )
 
-const recvWindow = "5000"
+// 15000 (а не дефолтные 5000): WAN-стойлы домашнего роутера задерживают доставку
+// подписанного запроса, из-за чего Bybit отбраковывает его как просроченный (10002).
+const recvWindow = "15000"
 
 // bybitClient is a read-only Bybit v5 client: balance and positions only.
 type bybitClient struct {
